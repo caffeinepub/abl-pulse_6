@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardList,
+  Download,
   Eye,
   EyeOff,
   Facebook,
@@ -14,14 +15,24 @@ import {
   Home,
   Instagram,
   Leaf,
+  Loader2,
   Menu,
   Phone,
+  Search,
   Star,
+  Trash2,
   Users,
   X,
   Youtube,
 } from "lucide-react";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import type { HealthSeekerRecord } from "./backend.d";
 
 /* ─────────────────────────────────────────────
    Scroll utility
@@ -157,9 +168,308 @@ function LeafDecor({
 }
 
 /* ─────────────────────────────────────────────
+   ADMIN DASHBOARD — helpers
+───────────────────────────────────────────── */
+
+function formatDate(nanoseconds: bigint): string {
+  const ms = Number(nanoseconds) / 1_000_000;
+  const d = new Date(ms);
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function getZoneLabel(category: string): string {
+  if (category === "needs_attention") return "Needs Attention";
+  if (category === "building_zone") return "Building Zone";
+  if (category === "strong_area") return "Strong Area";
+  return category;
+}
+
+function getZoneColors(category: string): {
+  bg: string;
+  color: string;
+  border: string;
+} {
+  if (category === "needs_attention")
+    return {
+      bg: "rgba(220,38,38,0.1)",
+      color: "#DC2626",
+      border: "rgba(220,38,38,0.25)",
+    };
+  if (category === "building_zone")
+    return {
+      bg: "rgba(217,119,6,0.1)",
+      color: "#D97706",
+      border: "rgba(217,119,6,0.25)",
+    };
+  return {
+    bg: "rgba(0,66,37,0.08)",
+    color: "#004225",
+    border: "rgba(0,66,37,0.2)",
+  };
+}
+
+function getAdminSectionZone(score: number): string {
+  if (score <= 13) return "needs_attention";
+  if (score <= 26) return "building_zone";
+  return "strong_area";
+}
+
+function downloadCSV(records: HealthSeekerRecord[]) {
+  const header =
+    "Name,Age,Gender,WhatsApp,Email,Date,Total Score,Zone,Sleep,Gut,Movement,Mind";
+  const rows = records.map((r) => {
+    const cols = [
+      r.name,
+      r.age,
+      r.gender,
+      r.whatsapp,
+      r.email ?? "",
+      formatDate(r.submittedAt),
+      String(Number(r.totalScore)),
+      getZoneLabel(r.category),
+      String(Number(r.sleepScore)),
+      String(Number(r.gutScore)),
+      String(Number(r.movementScore)),
+      String(Number(r.mindScore)),
+    ];
+    return cols.map((c) => `"${c.replace(/"/g, '""')}"`).join(",");
+  });
+  const csv = [header, ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ABL-PULSE-Records-${new Date().toISOString().split("T")[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ─────────────────────────────────────────────
+   ADMIN DETAIL MODAL
+───────────────────────────────────────────── */
+function AdminDetailModal({
+  record,
+  onClose,
+}: {
+  record: HealthSeekerRecord;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const sections = [
+    { label: "Sleep & Hydration", score: Number(record.sleepScore) },
+    { label: "Gut Cleanse & Metabolic", score: Number(record.gutScore) },
+    { label: "Movement & Circulation", score: Number(record.movementScore) },
+    { label: "Mind & Emotional Balance", score: Number(record.mindScore) },
+  ];
+
+  return (
+    <div
+      data-ocid="admin.detail_modal"
+      className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <div
+        className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden"
+        style={{
+          background: "white",
+          maxHeight: "90vh",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+        }}
+      >
+        {/* Modal Header */}
+        <div
+          className="flex items-center justify-between px-5 py-4 flex-shrink-0"
+          style={{ borderBottom: "1px solid rgba(0,66,37,0.08)" }}
+        >
+          <div>
+            <h3
+              className="font-display font-bold text-base"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              {record.name}
+            </h3>
+            <p
+              className="text-xs mt-0.5"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              Submitted: {formatDate(record.submittedAt)}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-ocid="admin.detail.close_button"
+            onClick={onClose}
+            className="flex items-center justify-center w-8 h-8 rounded-full transition-all"
+            style={{ background: "oklch(var(--abl-bg))" }}
+          >
+            <X size={16} style={{ color: "oklch(var(--abl-green))" }} />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="overflow-y-auto flex-1 p-5 flex flex-col gap-4">
+          {/* Personal Info */}
+          <div>
+            <p
+              className="text-xs font-bold uppercase tracking-wider mb-2.5"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              Personal Details
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ["Age", record.age],
+                ["Gender", record.gender],
+                ["Profession", record.profession],
+                ["Weight", record.weight],
+                ["Height", record.height],
+                ["BP", record.bp],
+                ["Sugar", record.sugar],
+                ["Thyroid", record.thyroid],
+                ["WhatsApp", record.whatsapp],
+                ["Email", record.email ?? "—"],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-xl p-2.5"
+                  style={{ background: "oklch(var(--abl-bg))" }}
+                >
+                  <p
+                    className="text-xs"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
+                  >
+                    {label}
+                  </p>
+                  <p
+                    className="text-sm font-semibold mt-0.5 truncate"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    {value || "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Overall Score */}
+          <div
+            className="rounded-2xl p-4 flex items-center justify-between"
+            style={{ background: "oklch(var(--abl-green))" }}
+          >
+            <div>
+              <p
+                className="text-xs font-semibold"
+                style={{ color: "rgba(255,255,255,0.7)" }}
+              >
+                Overall Score
+              </p>
+              <p className="text-2xl font-bold text-white mt-0.5">
+                {Number(record.totalScore)}
+                <span className="text-sm font-normal opacity-70">/160</span>
+              </p>
+            </div>
+            <span
+              className="px-3 py-1.5 rounded-full text-xs font-bold"
+              style={{
+                background: "rgba(255,255,255,0.18)",
+                color: "white",
+              }}
+            >
+              {getZoneLabel(record.category)}
+            </span>
+          </div>
+
+          {/* Section Scores */}
+          <div>
+            <p
+              className="text-xs font-bold uppercase tracking-wider mb-2.5"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              Section Scores
+            </p>
+            <div className="flex flex-col gap-2">
+              {sections.map(({ label, score }) => {
+                const zone = getAdminSectionZone(score);
+                const zc = getZoneColors(zone);
+                return (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                    style={{ background: "oklch(var(--abl-bg))" }}
+                  >
+                    <p
+                      className="text-sm font-medium"
+                      style={{ color: "oklch(var(--abl-green))" }}
+                    >
+                      {label}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-sm font-bold"
+                        style={{ color: "oklch(var(--abl-green))" }}
+                      >
+                        {score}
+                        <span className="text-xs font-normal opacity-60">
+                          /40
+                        </span>
+                      </span>
+                      <span
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                        style={{
+                          background: zc.bg,
+                          color: zc.color,
+                          border: `1px solid ${zc.border}`,
+                        }}
+                      >
+                        {getZoneLabel(zone)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
    ADMIN DASHBOARD
 ───────────────────────────────────────────── */
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
+  const { actor } = useActor();
+  const [activeTab, setActiveTab] = useState<"overview" | "records">(
+    "overview",
+  );
+  const [records, setRecords] = useState<HealthSeekerRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [zoneFilter, setZoneFilter] = useState<
+    "all" | "needs_attention" | "building_zone" | "strong_area"
+  >("all");
+  const [selectedRecord, setSelectedRecord] =
+    useState<HealthSeekerRecord | null>(null);
+  const [localDeleted, setLocalDeleted] = useState<Set<bigint>>(new Set());
+
   // Prevent body scroll
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -167,6 +477,74 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       document.body.style.overflow = "";
     };
   }, []);
+
+  // Fetch records
+  const fetchRecords = useCallback(async () => {
+    if (!actor) {
+      setError("Backend not available. Please refresh and try again.");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const data = await actor.getSubmissions();
+      // Sort newest first
+      const sorted = [...data].sort((a, b) =>
+        Number(b.submittedAt - a.submittedAt),
+      );
+      setRecords(sorted);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("stopped") || msg.includes("IC0508")) {
+        setError("Backend is restarting. Please wait a moment and try again.");
+      } else {
+        setError("Failed to load records. Please try again.");
+      }
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [actor]);
+
+  useEffect(() => {
+    fetchRecords();
+  }, [fetchRecords]);
+
+  // Filtered records (excluding locally deleted)
+  const visibleRecords = records.filter((r) => !localDeleted.has(r.id));
+
+  const filteredRecords = visibleRecords.filter((r) => {
+    const matchSearch = r.name.toLowerCase().includes(search.toLowerCase());
+    const matchZone = zoneFilter === "all" || r.category === zoneFilter;
+    return matchSearch && matchZone;
+  });
+
+  // Zone counts
+  const needsAttentionCount = visibleRecords.filter(
+    (r) => r.category === "needs_attention",
+  ).length;
+  const buildingZoneCount = visibleRecords.filter(
+    (r) => r.category === "building_zone",
+  ).length;
+  const strongAreaCount = visibleRecords.filter(
+    (r) => r.category === "strong_area",
+  ).length;
+
+  const recentRecords = visibleRecords.slice(0, 5);
+
+  const handleDelete = (id: bigint) => {
+    setLocalDeleted((prev) => new Set(prev).add(id));
+    if (selectedRecord?.id === id) setSelectedRecord(null);
+  };
+
+  // Shared card style
+  const cardStyle: CSSProperties = {
+    background: "white",
+    border: "1.5px solid oklch(var(--abl-green) / 0.1)",
+    boxShadow: "0 2px 8px rgba(0,66,37,0.06)",
+    borderRadius: "16px",
+  };
 
   return (
     <div
@@ -176,7 +554,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     >
       {/* Top bar */}
       <div
-        className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+        className="flex items-center justify-between px-4 py-3 flex-shrink-0"
         style={{
           background: "oklch(var(--abl-green))",
           borderBottom: "1px solid rgba(255,255,255,0.1)",
@@ -214,51 +592,475 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         </button>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div
-          className="w-full max-w-md rounded-3xl p-8 flex flex-col items-center gap-5 text-center"
-          style={{
-            background: "white",
-            border: "1.5px solid oklch(var(--abl-green) / 0.15)",
-            boxShadow:
-              "0 4px 6px rgba(0,0,0,0.04), 0 10px 30px rgba(0,66,37,0.10)",
-          }}
-        >
-          <CheckCircle2
-            size={52}
-            style={{ color: "oklch(var(--abl-green))" }}
-          />
-          <div>
-            <h2
-              className="font-display font-bold text-2xl mb-2"
-              style={{ color: "oklch(var(--abl-green))" }}
+      {/* Tab Bar */}
+      <div
+        className="flex flex-shrink-0"
+        style={{
+          borderBottom: "1.5px solid oklch(var(--abl-green) / 0.1)",
+          background: "white",
+        }}
+      >
+        {(["overview", "records"] as const).map((tab) => {
+          const isActive = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              data-ocid={
+                tab === "overview" ? "admin.overview_tab" : "admin.records_tab"
+              }
+              onClick={() => setActiveTab(tab)}
+              className="flex-1 py-3 text-sm font-semibold capitalize transition-all relative"
+              style={{
+                color: isActive
+                  ? "oklch(var(--abl-green))"
+                  : "oklch(var(--abl-green-mid))",
+              }}
             >
-              Admin Panel
-            </h2>
+              {tab === "overview" ? "Overview" : "Records"}
+              {isActive && (
+                <span
+                  className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
+                  style={{ background: "oklch(var(--abl-green))" }}
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab Content */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Loading */}
+        {loading && (
+          <div
+            data-ocid="admin.loading_state"
+            className="flex flex-col items-center justify-center gap-3 py-16"
+          >
+            <Loader2
+              size={32}
+              className="animate-spin"
+              style={{ color: "oklch(var(--abl-green))" }}
+            />
             <p
-              className="text-sm leading-relaxed"
+              className="text-sm"
               style={{ color: "oklch(var(--abl-green-mid))" }}
             >
-              Dashboard is being set up. Full access coming soon.
+              Loading records…
             </p>
           </div>
-          <span
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold"
+        )}
+
+        {/* Error */}
+        {!loading && error && (
+          <div
+            data-ocid="admin.error_state"
+            className="m-4 p-4 rounded-2xl flex items-center gap-3"
             style={{
               background: "rgba(220,38,38,0.08)",
-              color: "#DC2626",
               border: "1px solid rgba(220,38,38,0.2)",
             }}
           >
-            🔐 Logged in as Admin
-          </span>
-          <p className="text-xs" style={{ color: "oklch(var(--abl-border))" }}>
-            Health Seeker records, analytics, and export features will be
-            available here once the admin dashboard is fully built.
-          </p>
-        </div>
+            <X size={18} color="#DC2626" />
+            <p className="text-sm font-medium" style={{ color: "#DC2626" }}>
+              {error}
+            </p>
+            <button
+              type="button"
+              onClick={fetchRecords}
+              className="ml-auto text-xs font-bold underline"
+              style={{ color: "#DC2626" }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* ─── OVERVIEW TAB ─── */}
+        {!loading && !error && activeTab === "overview" && (
+          <div className="p-4 flex flex-col gap-4">
+            {/* Total */}
+            <div
+              className="rounded-2xl px-4 py-3 flex items-center justify-between"
+              style={cardStyle}
+            >
+              <p
+                className="text-sm font-medium"
+                style={{ color: "oklch(var(--abl-green-mid))" }}
+              >
+                Total Submissions
+              </p>
+              <p
+                className="text-2xl font-bold"
+                style={{ color: "oklch(var(--abl-green))" }}
+              >
+                {visibleRecords.length}
+              </p>
+            </div>
+
+            {/* Zone stat cards */}
+            <div className="grid grid-cols-3 gap-2.5">
+              {/* Needs Attention */}
+              <div
+                className="rounded-2xl p-3 flex flex-col items-center gap-1"
+                style={{
+                  background: "rgba(220,38,38,0.08)",
+                  border: "1.5px solid rgba(220,38,38,0.18)",
+                }}
+              >
+                <span className="text-xl">🔴</span>
+                <p className="text-lg font-bold" style={{ color: "#DC2626" }}>
+                  {needsAttentionCount}
+                </p>
+                <p
+                  className="text-xs font-semibold text-center leading-tight"
+                  style={{ color: "#DC2626" }}
+                >
+                  Needs
+                  <br />
+                  Attention
+                </p>
+              </div>
+
+              {/* Building Zone */}
+              <div
+                className="rounded-2xl p-3 flex flex-col items-center gap-1"
+                style={{
+                  background: "rgba(217,119,6,0.08)",
+                  border: "1.5px solid rgba(217,119,6,0.18)",
+                }}
+              >
+                <span className="text-xl">🟡</span>
+                <p className="text-lg font-bold" style={{ color: "#D97706" }}>
+                  {buildingZoneCount}
+                </p>
+                <p
+                  className="text-xs font-semibold text-center leading-tight"
+                  style={{ color: "#D97706" }}
+                >
+                  Building
+                  <br />
+                  Zone
+                </p>
+              </div>
+
+              {/* Strong Area */}
+              <div
+                className="rounded-2xl p-3 flex flex-col items-center gap-1"
+                style={{
+                  background: "rgba(0,66,37,0.07)",
+                  border: "1.5px solid rgba(0,66,37,0.16)",
+                }}
+              >
+                <span className="text-xl">🟢</span>
+                <p className="text-lg font-bold" style={{ color: "#004225" }}>
+                  {strongAreaCount}
+                </p>
+                <p
+                  className="text-xs font-semibold text-center leading-tight"
+                  style={{ color: "#004225" }}
+                >
+                  Strong
+                  <br />
+                  Area
+                </p>
+              </div>
+            </div>
+
+            {/* Recent Submissions */}
+            <div>
+              <p
+                className="text-xs font-bold uppercase tracking-wider mb-2.5 px-1"
+                style={{ color: "oklch(var(--abl-green-mid))" }}
+              >
+                Recent Submissions (Last 5)
+              </p>
+              {recentRecords.length === 0 ? (
+                <div className="rounded-2xl p-6 text-center" style={cardStyle}>
+                  <p
+                    className="text-sm"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
+                  >
+                    No submissions yet.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {recentRecords.map((r, i) => {
+                    const zc = getZoneColors(r.category);
+                    return (
+                      <button
+                        type="button"
+                        key={String(r.id)}
+                        data-ocid={`admin.records.row.${i + 1}`}
+                        className="w-full rounded-2xl p-3.5 flex items-center gap-3 text-left transition-all active:scale-[0.99]"
+                        style={cardStyle}
+                        onClick={() => setSelectedRecord(r)}
+                      >
+                        <div
+                          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold"
+                          style={{
+                            background: "oklch(var(--abl-green) / 0.1)",
+                            color: "oklch(var(--abl-green))",
+                          }}
+                        >
+                          {r.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className="text-sm font-semibold truncate"
+                            style={{ color: "oklch(var(--abl-green))" }}
+                          >
+                            {r.name}
+                          </p>
+                          <p
+                            className="text-xs truncate"
+                            style={{ color: "oklch(var(--abl-green-mid))" }}
+                          >
+                            {r.whatsapp} · {formatDate(r.submittedAt)}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          <p
+                            className="text-sm font-bold"
+                            style={{ color: "oklch(var(--abl-green))" }}
+                          >
+                            {Number(r.totalScore)}
+                            <span className="text-xs font-normal opacity-60">
+                              /160
+                            </span>
+                          </p>
+                          <span
+                            className="text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                            style={{
+                              background: zc.bg,
+                              color: zc.color,
+                              border: `1px solid ${zc.border}`,
+                            }}
+                          >
+                            {getZoneLabel(r.category)}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ─── RECORDS TAB ─── */}
+        {!loading && !error && activeTab === "records" && (
+          <div className="p-4 flex flex-col gap-3">
+            {/* Search + CSV */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <Search
+                  size={15}
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                />
+                <input
+                  type="text"
+                  data-ocid="admin.search_input"
+                  placeholder="Search by name…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2.5 text-sm rounded-xl outline-none"
+                  style={{
+                    background: "white",
+                    border: "1.5px solid oklch(var(--abl-green) / 0.2)",
+                    color: "oklch(var(--abl-green))",
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                data-ocid="admin.csv_download_button"
+                onClick={() => downloadCSV(filteredRecords)}
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold flex-shrink-0 transition-all active:scale-[0.97]"
+                style={{
+                  background: "oklch(var(--abl-green))",
+                  color: "white",
+                }}
+              >
+                <Download size={14} />
+                CSV
+              </button>
+            </div>
+
+            {/* Zone Filter */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              {(
+                [
+                  {
+                    id: "all",
+                    label: "All",
+                    ocid: "admin.zone_filter_all_button",
+                  },
+                  {
+                    id: "needs_attention",
+                    label: "🔴 Needs Attention",
+                    ocid: "admin.zone_filter_na_button",
+                  },
+                  {
+                    id: "building_zone",
+                    label: "🟡 Building Zone",
+                    ocid: "admin.zone_filter_bz_button",
+                  },
+                  {
+                    id: "strong_area",
+                    label: "🟢 Strong Area",
+                    ocid: "admin.zone_filter_sa_button",
+                  },
+                ] as const
+              ).map(({ id, label, ocid }) => {
+                const isActive = zoneFilter === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    data-ocid={ocid}
+                    onClick={() => setZoneFilter(id)}
+                    className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all"
+                    style={{
+                      background: isActive
+                        ? "oklch(var(--abl-green))"
+                        : "white",
+                      color: isActive ? "white" : "oklch(var(--abl-green))",
+                      border: `1.5px solid oklch(var(--abl-green) / ${isActive ? "1" : "0.25"})`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Records List */}
+            {filteredRecords.length === 0 ? (
+              <div
+                className="rounded-2xl p-8 text-center"
+                style={cardStyle}
+                data-ocid="admin.records.empty_state"
+              >
+                <p
+                  className="text-sm"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  {search || zoneFilter !== "all"
+                    ? "No matching records found."
+                    : "No submissions yet."}
+                </p>
+              </div>
+            ) : (
+              <div
+                data-ocid="admin.records_table"
+                className="flex flex-col gap-2"
+              >
+                {filteredRecords.map((r, i) => {
+                  const zc = getZoneColors(r.category);
+                  return (
+                    <div
+                      key={String(r.id)}
+                      data-ocid={`admin.records.row.${i + 1}`}
+                      className="rounded-2xl p-3.5 flex items-center gap-3 transition-all"
+                      style={cardStyle}
+                    >
+                      {/* Index */}
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold"
+                        style={{
+                          background: "oklch(var(--abl-bg))",
+                          color: "oklch(var(--abl-green-mid))",
+                        }}
+                      >
+                        {i + 1}
+                      </div>
+
+                      {/* Info — clickable */}
+                      <button
+                        type="button"
+                        className="flex-1 min-w-0 cursor-pointer text-left"
+                        onClick={() => setSelectedRecord(r)}
+                      >
+                        <p
+                          className="text-sm font-semibold truncate"
+                          style={{ color: "oklch(var(--abl-green))" }}
+                        >
+                          {r.name}
+                        </p>
+                        <p
+                          className="text-xs truncate mt-0.5"
+                          style={{ color: "oklch(var(--abl-green-mid))" }}
+                        >
+                          {r.age}y · {r.gender} · {r.whatsapp}
+                        </p>
+                        <p
+                          className="text-xs mt-0.5"
+                          style={{ color: "oklch(var(--abl-border))" }}
+                        >
+                          {formatDate(r.submittedAt)}
+                        </p>
+                      </button>
+
+                      {/* Score + Zone */}
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        <p
+                          className="text-sm font-bold"
+                          style={{ color: "oklch(var(--abl-green))" }}
+                        >
+                          {Number(r.totalScore)}
+                          <span className="text-xs font-normal opacity-60">
+                            /160
+                          </span>
+                        </p>
+                        <span
+                          className="text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                          style={{
+                            background: zc.bg,
+                            color: zc.color,
+                            border: `1px solid ${zc.border}`,
+                          }}
+                        >
+                          {getZoneLabel(r.category)}
+                        </span>
+                      </div>
+
+                      {/* Delete */}
+                      <button
+                        type="button"
+                        data-ocid={`admin.delete_button.${i + 1}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(r.id);
+                        }}
+                        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all active:scale-90"
+                        style={{
+                          background: "rgba(220,38,38,0.08)",
+                          border: "1px solid rgba(220,38,38,0.18)",
+                        }}
+                        title="Delete record"
+                      >
+                        <Trash2 size={14} color="#DC2626" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Detail Modal */}
+      {selectedRecord && (
+        <AdminDetailModal
+          record={selectedRecord}
+          onClose={() => setSelectedRecord(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2567,6 +3369,16 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
                 form.email || null,
                 answersArray,
               )
+              .then(() => {
+                // Silent admin WhatsApp notification — user sees nothing
+                const adminMsg = encodeURIComponent(
+                  `New ABL PULSE Submission!\nName: ${form.name}\nScore: ${result.totalScore}/160\nZone: ${result.category}\nWhatsApp: ${form.whatsapp}`,
+                );
+                window.open(
+                  `https://wa.me/919065738555?text=${adminMsg}`,
+                  "_blank",
+                );
+              })
               .catch(console.error);
           }
         }}
