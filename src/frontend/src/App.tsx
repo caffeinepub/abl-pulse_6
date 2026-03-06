@@ -3370,14 +3370,7 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
                 answersArray,
               )
               .then(() => {
-                // Silent admin WhatsApp notification — user sees nothing
-                const adminMsg = encodeURIComponent(
-                  `New ABL PULSE Submission!\nName: ${form.name}\nScore: ${result.totalScore}/160\nZone: ${result.category}\nWhatsApp: ${form.whatsapp}`,
-                );
-                window.open(
-                  `https://wa.me/919065738555?text=${adminMsg}`,
-                  "_blank",
-                );
+                // Admin notification removed — user data privacy protected
               })
               .catch(console.error);
           }
