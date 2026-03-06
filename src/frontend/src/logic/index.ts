@@ -51,3 +51,17 @@ export {
   getSection2NeedsAttention,
 } from "./suggestions/section2-gut";
 export type { NeedsAttentionItem2 } from "./suggestions/section2-gut";
+
+// Suggestions – Section 3 (Movement & Circulation: Q1–Q10 – fully populated)
+export {
+  SECTION3_SUGGESTIONS,
+  getSection3NeedsAttention,
+} from "./suggestions/section3-movement";
+export type { NeedsAttentionItem3 } from "./suggestions/section3-movement";
+
+// Suggestions – Section 4 (Mind & Emotional Balance: Q1–Q10 – fully populated)
+export {
+  SECTION4_SUGGESTIONS,
+  getSection4NeedsAttention,
+} from "./suggestions/section4-mind";
+export type { NeedsAttentionItem4 } from "./suggestions/section4-mind";

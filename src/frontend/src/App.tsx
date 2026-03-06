@@ -377,12 +377,17 @@ import { useActor } from "./hooks/useActor";
 import {
   ASSESSMENT_CONTENT,
   type Lang,
-  type NeedsAttentionItem,
-  type NeedsAttentionItem2,
   QUESTION_OPTIONS,
+  type QuestionSuggestions,
+  SECTION1_SUGGESTIONS,
+  SECTION2_SUGGESTIONS,
+  SECTION3_SUGGESTIONS,
+  SECTION4_SUGGESTIONS,
   SECTIONS,
   getSection1NeedsAttention,
   getSection2NeedsAttention,
+  getSection3NeedsAttention,
+  getSection4NeedsAttention,
 } from "./logic/index";
 import { type ScoreResult, calculateScore } from "./logic/scoring";
 
@@ -867,251 +872,678 @@ function QuestionnaireStep({
 }
 
 /* ─────────────────────────────────────────────
-   SECTION 1 RESULT CARD (Sleep & Hydration)
+   GAUGE METER — Semicircular SVG gauge
 ───────────────────────────────────────────── */
-function Section1ResultCard({
-  answers,
-  pillarScore,
-  lang,
+function GaugeMeter({
+  value,
+  max,
+  size = 200,
 }: {
-  answers: Record<string, number>;
-  pillarScore: number;
-  lang: Lang;
+  value: number;
+  max: number;
+  size?: number;
 }) {
-  const needsAttentionItems: NeedsAttentionItem[] =
-    getSection1NeedsAttention(answers);
-  const hasAlert = needsAttentionItems.length > 0;
+  // Semicircle: center at (cx, cy), radius r
+  // Arc goes from left (-180deg) to right (0deg) in standard SVG coords
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size * 0.38;
+  const strokeWidth = size * 0.09;
+  const halfStroke = strokeWidth / 2;
+
+  // The arc spans 180 degrees (π radians), flat at bottom
+
+  // Zone thresholds as fraction of arc
+  // needs_attention: 0–33.125%, building_zone: 33.125–66.25%, strong_area: 66.25–100%
+  const z1 = 0.33125;
+  const z2 = 0.6625;
+
+  // Convert polar angle (0=left, 180=right on bottom semicircle) to SVG path
+  // Angle 0 = leftmost point, Angle 180 = rightmost point
+  // In SVG: left = (cx - r, cy), right = (cx + r, cy), top = (cx, cy - r)
+  function polarToSVG(angleDeg: number): { x: number; y: number } {
+    // 0deg = left side, 180deg = right side, 90deg = top
+    const rad = ((angleDeg - 180) * Math.PI) / 180;
+    return {
+      x: cx + r * Math.cos(rad),
+      y: cy + r * Math.sin(rad),
+    };
+  }
+
+  // Arc path from startAngle to endAngle (0=left, 180=right)
+  function arcPath(startDeg: number, endDeg: number): string {
+    const start = polarToSVG(startDeg);
+    const end = polarToSVG(endDeg);
+    const largeArc = endDeg - startDeg > 180 ? 1 : 0;
+    return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
+  }
+
+  // Needle angle: 0 (left) to 180 (right) based on value/max
+  const fraction = Math.min(Math.max(value / max, 0), 1);
+  const needleAngle = fraction * 180; // degrees: 0=left, 180=right
+
+  // Needle tip (rotated from center)
+  const needleRad = ((needleAngle - 180) * Math.PI) / 180;
+  const needleLen = r * 0.85;
+  const needleTipX = cx + needleLen * Math.cos(needleRad);
+  const needleTipY = cy + needleLen * Math.sin(needleRad);
+
+  // Zone colors
+  const red = "#DC2626";
+  const amber = "#D97706";
+  const green = "#004225";
+
+  // Determine current zone color for score text
+  let scoreColor = red;
+  if (fraction >= z2) scoreColor = green;
+  else if (fraction >= z1) scoreColor = amber;
+
+  const svgH = cy + halfStroke + 4; // only top half + stroke
+  const viewH = svgH;
+
+  return (
+    <svg
+      width={size}
+      height={viewH}
+      viewBox={`0 0 ${size} ${viewH}`}
+      aria-hidden="true"
+      style={{ display: "block", margin: "0 auto", overflow: "visible" }}
+    >
+      {/* Background track */}
+      <path
+        d={arcPath(0, 180)}
+        fill="none"
+        stroke="#e5e7eb"
+        strokeWidth={strokeWidth}
+        strokeLinecap="butt"
+      />
+
+      {/* Zone 1: Red (0–33.125% of 180deg = 0–59.6deg) */}
+      <path
+        d={arcPath(0, z1 * 180)}
+        fill="none"
+        stroke={red}
+        strokeWidth={strokeWidth}
+        strokeLinecap="butt"
+        opacity={0.9}
+      />
+
+      {/* Zone 2: Amber (33.125%–66.25% = 59.6–119.25deg) */}
+      <path
+        d={arcPath(z1 * 180, z2 * 180)}
+        fill="none"
+        stroke={amber}
+        strokeWidth={strokeWidth}
+        strokeLinecap="butt"
+        opacity={0.9}
+      />
+
+      {/* Zone 3: Green (66.25%–100% = 119.25–180deg) */}
+      <path
+        d={arcPath(z2 * 180, 180)}
+        fill="none"
+        stroke={green}
+        strokeWidth={strokeWidth}
+        strokeLinecap="butt"
+        opacity={0.9}
+      />
+
+      {/* Needle */}
+      <line
+        x1={cx}
+        y1={cy}
+        x2={needleTipX}
+        y2={needleTipY}
+        stroke="#1f2937"
+        strokeWidth={size * 0.018}
+        strokeLinecap="round"
+      />
+
+      {/* Needle pivot circle */}
+      <circle cx={cx} cy={cy} r={size * 0.045} fill="#1f2937" />
+      <circle cx={cx} cy={cy} r={size * 0.025} fill="white" />
+
+      {/* Score text below needle pivot */}
+      <text
+        x={cx}
+        y={cy + size * 0.12}
+        textAnchor="middle"
+        fontSize={size * 0.145}
+        fontWeight="800"
+        fill={scoreColor}
+        fontFamily="'Fraunces', Georgia, serif"
+      >
+        {value}
+      </text>
+      <text
+        x={cx}
+        y={cy + size * 0.22}
+        textAnchor="middle"
+        fontSize={size * 0.07}
+        fontWeight="600"
+        fill="#6b7280"
+        fontFamily="system-ui, sans-serif"
+      >
+        /{max}
+      </text>
+    </svg>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   ZONE HELPERS
+───────────────────────────────────────────── */
+type ZoneKey = "needs_attention" | "building_zone" | "strong_area";
+
+function getSectionZone(score: number): ZoneKey {
+  if (score <= 13) return "needs_attention";
+  if (score <= 26) return "building_zone";
+  return "strong_area";
+}
+
+const ZONE_CONFIG: Record<
+  ZoneKey,
+  {
+    color: string;
+    bg: string;
+    border: string;
+    emoji: string;
+    labelEN: string;
+    labelHI: string;
+  }
+> = {
+  needs_attention: {
+    color: "#DC2626",
+    bg: "rgba(220,38,38,0.08)",
+    border: "rgba(220,38,38,0.25)",
+    emoji: "🔴",
+    labelEN: "Needs Attention",
+    labelHI: "ध्यान दें",
+  },
+  building_zone: {
+    color: "#D97706",
+    bg: "rgba(217,119,6,0.08)",
+    border: "rgba(217,119,6,0.28)",
+    emoji: "🟡",
+    labelEN: "Building Zone",
+    labelHI: "निर्माण क्षेत्र",
+  },
+  strong_area: {
+    color: "#004225",
+    bg: "rgba(0,66,37,0.08)",
+    border: "rgba(0,66,37,0.22)",
+    emoji: "🟢",
+    labelEN: "Strong Area",
+    labelHI: "मजबूत क्षेत्र",
+  },
+};
+
+/* ─────────────────────────────────────────────
+   COMPACT SECTION CARD (R2)
+───────────────────────────────────────────── */
+const SECTION_META = [
+  {
+    numEN: "Section 1",
+    numHI: "भाग 1",
+    nameEN: "Sleep & Hydration",
+    nameHI: "नींद और हाइड्रेशन",
+  },
+  {
+    numEN: "Section 2",
+    numHI: "भाग 2",
+    nameEN: "Gut Cleanse & Metabolic",
+    nameHI: "गट क्लींज और मेटाबोलिक",
+  },
+  {
+    numEN: "Section 3",
+    numHI: "भाग 3",
+    nameEN: "Movement & Circulation",
+    nameHI: "मूवमेंट और सर्कुलेशन",
+  },
+  {
+    numEN: "Section 4",
+    numHI: "भाग 4",
+    nameEN: "Mind & Emotional Balance",
+    nameHI: "माइंड और भावनात्मक संतुलन",
+  },
+] as const;
+
+const SECTION_OCIDS = [
+  "result.section1_card",
+  "result.section2_card",
+  "result.section3_card",
+  "result.section4_card",
+] as const;
+
+function CompactSectionCard({
+  sectionIndex,
+  sectionScore,
+  answers,
+  lang,
+  suggestionsData,
+}: {
+  sectionIndex: 0 | 1 | 2 | 3;
+  sectionScore: number;
+  answers: Record<string, number>;
+  lang: Lang;
+  suggestionsData: QuestionSuggestions[];
+}) {
+  // Determine if any answer in this section is 0 or 1
+  const hasAlert = Array.from({ length: 10 }, (_, qi) => {
+    const val = answers[`s${sectionIndex}-q${qi}`];
+    return val !== undefined && val <= 1;
+  }).some(Boolean);
+
+  const zone = getSectionZone(sectionScore);
+  const zoneCfg = ZONE_CONFIG[zone];
+  const meta = SECTION_META[sectionIndex];
+  const ocid = SECTION_OCIDS[sectionIndex];
+
+  // Representative suggestion: first question's suggestion for the current zone
+  const repSuggestion =
+    suggestionsData.length > 0
+      ? lang === "en"
+        ? suggestionsData[0][zone].en
+        : suggestionsData[0][zone].hi
+      : "";
 
   return (
     <div
-      data-ocid="result.section1_card"
-      className="w-full rounded-2xl overflow-hidden shadow-sm relative"
+      data-ocid={ocid}
+      className="rounded-2xl overflow-hidden relative flex flex-col"
       style={{
         background: "white",
-        border: "1.5px solid oklch(var(--abl-border) / 0.6)",
+        border: `1.5px solid ${zoneCfg.border}`,
+        boxShadow: "0 2px 12px rgba(0,66,37,0.06)",
       }}
     >
-      {/* Red Alert icon — top right corner — only when hasAlert */}
+      {/* Alert badge */}
       {hasAlert && (
         <span
-          className="absolute top-3 right-3 text-base leading-none"
-          aria-label="Needs Attention Alert"
+          className="absolute top-2.5 right-3 text-sm leading-none"
+          aria-label="Needs Attention"
           title="Some habits need attention"
         >
           🔴
         </span>
       )}
 
-      {/* Card Header */}
-      <div
-        className="px-5 py-4"
-        style={{ borderBottom: "1px solid oklch(var(--abl-border) / 0.4)" }}
-      >
+      {/* Header */}
+      <div className="px-4 pt-4 pb-2">
         <p
-          className="text-xs font-bold tracking-widest uppercase mb-1"
+          className="text-[10px] font-bold tracking-widest uppercase mb-0.5"
           style={{ color: "oklch(var(--abl-green-mid))" }}
         >
-          {lang === "en" ? "Section 1" : "भाग 1"}
+          {lang === "en" ? meta.numEN : meta.numHI}
         </p>
         <h3
-          className="font-display font-bold text-base pr-8"
+          className="font-display font-bold text-sm leading-tight pr-6"
           style={{ color: "oklch(var(--abl-green))" }}
         >
-          {lang === "en" ? "Sleep & Hydration" : "नींद और हाइड्रेशन"}
+          {lang === "en" ? meta.nameEN : meta.nameHI}
         </h3>
+      </div>
+
+      {/* Mini Gauge */}
+      <div className="flex flex-col items-center py-2">
+        <GaugeMeter value={sectionScore} max={40} size={130} />
         <p
-          className="text-sm font-bold mt-1"
+          className="text-xs font-bold -mt-1"
           style={{ color: "oklch(var(--abl-gold))" }}
         >
           {lang === "en"
-            ? `Score: ${pillarScore}/40`
-            : `स्कोर: ${pillarScore}/40`}
+            ? `Score: ${sectionScore}/40`
+            : `स्कोर: ${sectionScore}/40`}
         </p>
       </div>
 
-      {/* Needs Attention items — blank if none */}
-      {hasAlert && (
-        <div className="px-5 py-4 flex flex-col gap-3">
-          <p
-            className="text-xs font-bold tracking-wide uppercase flex items-center gap-1.5"
-            style={{ color: "#DC2626" }}
-          >
-            <span aria-hidden="true">⚠</span>
-            {lang === "en" ? "Needs Attention" : "ध्यान दें"}
-          </p>
-          <ul className="flex flex-col gap-3">
-            {needsAttentionItems.map((item) => (
-              <li key={item.questionIndex} className="flex items-start gap-2.5">
-                <span
-                  className="flex-shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full"
-                  style={{ background: "#DC2626", marginTop: "0.45rem" }}
-                  aria-hidden="true"
-                />
-                <div className="flex flex-col gap-0.5">
-                  <span
-                    className="text-xs font-semibold"
-                    style={{ color: "oklch(var(--abl-green-mid))" }}
-                  >
-                    {lang === "en"
-                      ? `Never / Rarely — ${item.label}`
-                      : `कभी नहीं / शायद ही — ${item.label}`}
-                  </span>
-                  <span
-                    className="text-xs leading-relaxed"
-                    style={{ color: "oklch(var(--abl-green))" }}
-                  >
-                    {lang === "en" ? item.suggestion.en : item.suggestion.hi}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Zone suggestion box */}
+      <div
+        className="mx-4 mb-4 rounded-xl px-3 py-2.5 flex flex-col gap-1"
+        style={{
+          background: zoneCfg.bg,
+          border: `1px solid ${zoneCfg.border}`,
+        }}
+      >
+        <p
+          className="text-xs font-bold flex items-center gap-1"
+          style={{ color: zoneCfg.color }}
+        >
+          <span aria-hidden="true">{zoneCfg.emoji}</span>
+          {lang === "en" ? zoneCfg.labelEN : zoneCfg.labelHI}
+        </p>
+        <p
+          className="text-[11px] leading-relaxed"
+          style={{ color: "oklch(var(--abl-green))" }}
+        >
+          {repSuggestion}
+        </p>
+      </div>
     </div>
   );
 }
 
 /* ─────────────────────────────────────────────
-   SECTION 2 RESULT CARD (Gut Cleanse & Metabolic)
-───────────────────────────────────────────── */
-function Section2ResultCard({
-  answers,
-  pillarScore,
-  lang,
-}: {
-  answers: Record<string, number>;
-  pillarScore: number;
-  lang: Lang;
-}) {
-  const needsAttentionItems: NeedsAttentionItem2[] =
-    getSection2NeedsAttention(answers);
-  const hasAlert = needsAttentionItems.length > 0;
-
-  return (
-    <div
-      data-ocid="result.section2_card"
-      className="w-full rounded-2xl overflow-hidden shadow-sm relative"
-      style={{
-        background: "white",
-        border: "1.5px solid oklch(var(--abl-border) / 0.6)",
-      }}
-    >
-      {/* Red Alert icon — top right corner — only when hasAlert */}
-      {hasAlert && (
-        <span
-          className="absolute top-3 right-3 text-base leading-none"
-          aria-label="Needs Attention Alert"
-          title="Some habits need attention"
-        >
-          🔴
-        </span>
-      )}
-
-      {/* Card Header */}
-      <div
-        className="px-5 py-4"
-        style={{ borderBottom: "1px solid oklch(var(--abl-border) / 0.4)" }}
-      >
-        <p
-          className="text-xs font-bold tracking-widest uppercase mb-1"
-          style={{ color: "oklch(var(--abl-green-mid))" }}
-        >
-          {lang === "en" ? "Section 2" : "भाग 2"}
-        </p>
-        <h3
-          className="font-display font-bold text-base pr-8"
-          style={{ color: "oklch(var(--abl-green))" }}
-        >
-          {lang === "en" ? "Gut Cleanse & Metabolic" : "गट क्लींज और मेटाबोलिक"}
-        </h3>
-        <p
-          className="text-sm font-bold mt-1"
-          style={{ color: "oklch(var(--abl-gold))" }}
-        >
-          {lang === "en"
-            ? `Score: ${pillarScore}/40`
-            : `स्कोर: ${pillarScore}/40`}
-        </p>
-      </div>
-
-      {/* Needs Attention items — blank if none */}
-      {hasAlert && (
-        <div className="px-5 py-4 flex flex-col gap-3">
-          <p
-            className="text-xs font-bold tracking-wide uppercase flex items-center gap-1.5"
-            style={{ color: "#DC2626" }}
-          >
-            <span aria-hidden="true">⚠</span>
-            {lang === "en" ? "Needs Attention" : "ध्यान दें"}
-          </p>
-          <ul className="flex flex-col gap-3">
-            {needsAttentionItems.map((item) => (
-              <li key={item.questionIndex} className="flex items-start gap-2.5">
-                <span
-                  className="flex-shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full"
-                  style={{ background: "#DC2626", marginTop: "0.45rem" }}
-                  aria-hidden="true"
-                />
-                <div className="flex flex-col gap-0.5">
-                  <span
-                    className="text-xs font-semibold"
-                    style={{ color: "oklch(var(--abl-green-mid))" }}
-                  >
-                    {lang === "en"
-                      ? `Never / Rarely — ${item.label}`
-                      : `कभी नहीं / शायद ही — ${item.label}`}
-                  </span>
-                  <span
-                    className="text-xs leading-relaxed"
-                    style={{ color: "oklch(var(--abl-green))" }}
-                  >
-                    {lang === "en" ? item.suggestion.en : item.suggestion.hi}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────────
-   RESULT SCREEN
+   RESULT SCREEN (R1 + R2 + R3 + R4 + R5 + R6 + R7)
 ───────────────────────────────────────────── */
 function ResultScreen({
   result,
   answers,
   lang,
+  onLangToggle,
   onBack,
+  userName,
+  userAge,
+  userGender,
 }: {
   result: ScoreResult;
   answers: Record<string, number>;
   lang: Lang;
+  onLangToggle: () => void;
   onBack: () => void;
+  userName?: string;
+  userAge?: string;
+  userGender?: string;
 }) {
-  // Category color tokens
-  const categoryConfig = {
-    needs_attention: {
-      color: "#DC2626",
-      bg: "rgba(220,38,38,0.08)",
-      border: "rgba(220,38,38,0.25)",
-    },
-    building_zone: {
-      color: "oklch(var(--abl-gold))",
-      bg: "oklch(var(--abl-gold) / 0.08)",
-      border: "oklch(var(--abl-gold) / 0.3)",
-    },
-    strong_area: {
-      color: "oklch(var(--abl-green))",
-      bg: "oklch(var(--abl-green) / 0.08)",
-      border: "oklch(var(--abl-green) / 0.25)",
-    },
-  };
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-  const cfg = categoryConfig[result.category];
+  const totalZone = result.category as ZoneKey;
+  const totalZoneCfg = ZONE_CONFIG[totalZone];
+
+  // Section scores
+  const sectionScores: [number, number, number, number] = [
+    result.pillarScores.sleep,
+    result.pillarScores.gut,
+    result.pillarScores.movement,
+    result.pillarScores.mind,
+  ];
+
+  const sectionSuggestions = [
+    SECTION1_SUGGESTIONS,
+    SECTION2_SUGGESTIONS,
+    SECTION3_SUGGESTIONS,
+    SECTION4_SUGGESTIONS,
+  ] as const;
+
+  /* ── R3 + R4: PDF Generation via print window ── */
+  const generatePDF = () => {
+    setIsGeneratingPDF(true);
+
+    const today = new Date();
+    const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+
+    const s1Items = getSection1NeedsAttention(answers);
+    const s2Items = getSection2NeedsAttention(answers);
+    const s3Items = getSection3NeedsAttention(answers);
+    const s4Items = getSection4NeedsAttention(answers);
+
+    const zoneLabel =
+      result.category === "needs_attention"
+        ? "🔴 Needs Attention"
+        : result.category === "building_zone"
+          ? "🟡 Building Zone"
+          : "🟢 Strong Area";
+
+    const zoneColor =
+      result.category === "needs_attention"
+        ? "#DC2626"
+        : result.category === "building_zone"
+          ? "#D97706"
+          : "#004225";
+
+    const sectionNames = [
+      "Sleep & Hydration",
+      "Gut Cleanse & Metabolic",
+      "Movement & Circulation",
+      "Mind & Emotional Balance",
+    ];
+
+    const sectionScoreArr = [
+      result.pillarScores.sleep,
+      result.pillarScores.gut,
+      result.pillarScores.movement,
+      result.pillarScores.mind,
+    ];
+
+    const sectionNeedsAttention = [s1Items, s2Items, s3Items, s4Items];
+
+    const getSectionZoneLabelColor = (score: number) => {
+      if (score <= 13) return { label: "🔴 Needs Attention", color: "#DC2626" };
+      if (score <= 26) return { label: "🟡 Building Zone", color: "#D97706" };
+      return { label: "🟢 Strong Area", color: "#004225" };
+    };
+
+    const buildSectionHtml = (secIdx: number) => {
+      const secScore = sectionScoreArr[secIdx];
+      const { label: secZoneLabel, color: secZoneColor } =
+        getSectionZoneLabelColor(secScore);
+      const naItems = sectionNeedsAttention[secIdx];
+      const naHtml =
+        naItems.length > 0
+          ? `<ul style="margin: 6px 0 0 0; padding-left: 18px; list-style: disc;">${naItems
+              .map(
+                (item) =>
+                  `<li style="font-size: 11px; color: #374151; margin-bottom: 4px; line-height: 1.5;">${lang === "en" ? item.suggestion.en : item.suggestion.hi}</li>`,
+              )
+              .join("")}</ul>`
+          : `<p style="font-size: 11px; color: #6b7280; margin: 4px 0 0 0; font-style: italic;">All habits on track – no attention needed.</p>`;
+
+      return `
+        <div style="margin-bottom: 14px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: white; break-inside: avoid;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+            <div>
+              <p style="font-size: 13px; font-weight: 700; color: #004225; margin: 0;">${sectionNames[secIdx]}</p>
+              <p style="font-size: 11px; color: #6b7280; margin: 2px 0 0 0;">Score: ${secScore}/40</p>
+            </div>
+            <span style="font-size: 11px; font-weight: 700; color: ${secZoneColor}; background: ${secZoneColor}20; padding: 3px 8px; border-radius: 20px;">${secZoneLabel}</span>
+          </div>
+          ${
+            naItems.length > 0
+              ? `<p style="font-size: 11px; font-weight: 700; color: #DC2626; margin: 8px 0 2px 0;">Needs Attention:</p>${naHtml}`
+              : naHtml
+          }
+        </div>`;
+    };
+
+    const logoUrl = `${window.location.origin}/assets/uploads/ABL-Pulse-Logo-1.png`;
+    const drSumanUrl = `${window.location.origin}/assets/uploads/Dr-Suman-Lal-2.png`;
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ABL PULSE Health Report – ${userName || "Health Seeker"}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page {
+      size: A4;
+      margin: 15mm 18mm 18mm 18mm;
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #1f2937;
+      background: white;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .page { width: 100%; }
+    .header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding-bottom: 14px;
+      border-bottom: 2.5px solid #004225;
+      margin-bottom: 16px;
+    }
+    .header-logo { width: 56px; height: 56px; object-fit: contain; flex-shrink: 0; }
+    .header-text { flex: 1; }
+    .header-title { font-size: 22px; font-weight: 800; color: #004225; letter-spacing: -0.5px; }
+    .header-subtitle { font-size: 11px; color: #9E6B3D; font-weight: 600; margin-top: 2px; }
+    .header-address { font-size: 10px; color: #6b7280; margin-top: 4px; line-height: 1.4; }
+    .header-contact { font-size: 10.5px; color: #004225; font-weight: 700; margin-top: 3px; }
+    
+    .section-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: #004225;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .seeker-row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 14px; padding: 12px 16px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; }
+    .seeker-field { display: flex; flex-direction: column; }
+    .seeker-label { font-size: 10px; color: #9b7653; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .seeker-value { font-size: 13px; font-weight: 700; color: #004225; margin-top: 2px; }
+
+    .score-box {
+      text-align: center;
+      padding: 16px;
+      background: linear-gradient(135deg, #f0fdf4, #e8f5e9);
+      border: 2px solid #004225;
+      border-radius: 12px;
+      margin-bottom: 16px;
+    }
+    .score-num { font-size: 40px; font-weight: 900; color: #004225; line-height: 1; }
+    .score-max { font-size: 18px; color: #6b7280; font-weight: 600; }
+    .score-zone { font-size: 16px; font-weight: 800; margin-top: 6px; }
+
+    .expert-cta {
+      background: linear-gradient(135deg, #004225, #006635);
+      color: white;
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin: 16px 0;
+      break-inside: avoid;
+    }
+    .expert-cta-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+    .expert-cta-body { font-size: 11px; opacity: 0.9; line-height: 1.5; }
+    .expert-cta-contact { font-size: 12px; font-weight: 700; margin-top: 6px; color: #fcd34d; }
+
+    .footer {
+      margin-top: 20px;
+      padding-top: 14px;
+      border-top: 2px solid #004225;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .footer-sig { display: flex; align-items: center; gap: 10px; }
+    .footer-dr-img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid #004225; }
+    .footer-name { font-size: 15px; font-weight: 800; color: #004225; font-style: italic; }
+    .footer-desig { font-size: 10px; color: #6b7280; margin-top: 2px; }
+    .footer-brand { text-align: right; }
+    .footer-brand-name { font-size: 13px; font-weight: 800; color: #004225; }
+    .footer-brand-tagline { font-size: 10px; color: #9E6B3D; }
+    .footer-date { font-size: 10px; color: #9b9b9b; margin-top: 2px; }
+
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <!-- HEADER -->
+  <div class="header">
+    <img class="header-logo" src="${logoUrl}" alt="ABL Pulse" onerror="this.style.display='none'" />
+    <div class="header-text">
+      <div class="header-title">ABL PULSE</div>
+      <div class="header-subtitle">Ayurved Banaye Life</div>
+      <div class="header-address">Old Museum South Wall, Dak-bangla Churaha, Near Kotwali Thana, Patna 1</div>
+      <div class="header-contact">📞 WhatsApp / Call: +91 9199434365</div>
+    </div>
+  </div>
+
+  <!-- HEALTH SEEKER DETAILS -->
+  <div class="section-title">Health Seeker Details</div>
+  <div class="seeker-row">
+    <div class="seeker-field">
+      <span class="seeker-label">Name</span>
+      <span class="seeker-value">${userName || "—"}</span>
+    </div>
+    <div class="seeker-field">
+      <span class="seeker-label">Age</span>
+      <span class="seeker-value">${userAge || "—"}</span>
+    </div>
+    <div class="seeker-field">
+      <span class="seeker-label">Gender</span>
+      <span class="seeker-value">${userGender || "—"}</span>
+    </div>
+    <div class="seeker-field">
+      <span class="seeker-label">Assessment Date</span>
+      <span class="seeker-value">${dateStr}</span>
+    </div>
+  </div>
+
+  <!-- OVERALL SCORE -->
+  <div class="section-title">Overall Health Readiness Score</div>
+  <div class="score-box">
+    <div>
+      <span class="score-num">${result.totalScore}</span>
+      <span class="score-max">/160</span>
+    </div>
+    <div class="score-zone" style="color: ${zoneColor};">${zoneLabel}</div>
+  </div>
+
+  <!-- SECTION-WISE REPORT -->
+  <div class="section-title">Section-wise Report</div>
+  ${[0, 1, 2, 3].map((i) => buildSectionHtml(i)).join("")}
+
+  <!-- EXPERT CTA -->
+  <div class="expert-cta">
+    <div class="expert-cta-title">🎯 1-on-1 Expert Consultation</div>
+    <div class="expert-cta-body">Apne Readiness Gap ko samajhne ke liye Dr. Suman Lal se 1-on-1 consultation book karein. Personalized guidance based on your health assessment report.</div>
+    <div class="expert-cta-contact">📱 WhatsApp: +91 9199434365</div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="footer-sig">
+      <img class="footer-dr-img" src="${drSumanUrl}" alt="Dr. Suman Lal" onerror="this.style.display='none'" />
+      <div>
+        <div class="footer-name">Dr. Suman Lal</div>
+        <div class="footer-desig">Naturopathy Practitioner | Doctorate in Psychology</div>
+      </div>
+    </div>
+    <div class="footer-brand">
+      <div class="footer-brand-name">ABL PULSE</div>
+      <div class="footer-brand-tagline">Ayurved Banaye Life</div>
+      <div class="footer-date">Generated: ${dateStr}</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>`;
+
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) {
+      setIsGeneratingPDF(false);
+      alert("Please allow popups to generate the PDF report.");
+      return;
+    }
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+
+    // Wait for images to load before printing
+    printWindow.onload = () => {
+      setTimeout(() => {
+        setIsGeneratingPDF(false);
+        printWindow.focus();
+        printWindow.print();
+        // After printing, open WhatsApp
+        const score = result.totalScore;
+        const waMsg = encodeURIComponent(
+          `Namaste, mujhe mera ABL PULSE Health Report share karna hai. Mera Score: ${score}/160`,
+        );
+        window.open(`https://wa.me/919199434365?text=${waMsg}`, "_blank");
+      }, 800);
+    };
+  };
 
   return (
     <div
@@ -1132,19 +1564,20 @@ function ResultScreen({
         />
       </div>
 
-      {/* Sticky top bar */}
+      {/* ── Sticky top bar ── */}
       <div
-        className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 flex-shrink-0"
+        className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 flex-shrink-0 gap-2"
         style={{
           background: "white",
           borderBottom: "1px solid oklch(var(--abl-border))",
         }}
       >
+        {/* Back button */}
         <button
           type="button"
           data-ocid="result.back_button"
           onClick={onBack}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all flex-shrink-0"
           style={{
             color: "oklch(var(--abl-green))",
             background: "oklch(var(--abl-green) / 0.08)",
@@ -1152,144 +1585,307 @@ function ResultScreen({
           }}
         >
           <ArrowLeft size={15} />
-          <span>{lang === "en" ? "Back to Home" : "होम पर वापस जाएं"}</span>
+          <span className="hidden sm:inline">
+            {lang === "en" ? "Home" : "होम"}
+          </span>
         </button>
 
+        {/* Language toggle */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            data-ocid="result.lang_en_toggle"
+            onClick={() => lang !== "en" && onLangToggle()}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: lang === "en" ? "oklch(var(--abl-green))" : "white",
+              color: lang === "en" ? "white" : "oklch(var(--abl-green))",
+              border: `1.5px solid oklch(var(--abl-green) / ${lang === "en" ? "1" : "0.3"})`,
+            }}
+          >
+            EN
+          </button>
+          <button
+            type="button"
+            data-ocid="result.lang_hi_toggle"
+            onClick={() => lang !== "hi" && onLangToggle()}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{
+              background: lang === "hi" ? "oklch(var(--abl-green))" : "white",
+              color: lang === "hi" ? "white" : "oklch(var(--abl-green))",
+              border: `1.5px solid oklch(var(--abl-green) / ${lang === "hi" ? "1" : "0.3"})`,
+            }}
+          >
+            हिं
+          </button>
+        </div>
+
+        {/* Logo */}
         <LogoImage
           imgClassName="h-8 w-8"
-          textClassName="text-sm"
+          textClassName="text-sm hidden sm:block"
           textStyle={{ color: "oklch(var(--abl-green))" }}
         />
       </div>
 
-      {/* Content */}
-      <div className="relative z-10 flex-1 py-8 px-4 pb-20">
-        <div className="max-w-md mx-auto flex flex-col items-center gap-6 text-center">
-          {/* Logo */}
-          <LogoImage
-            imgClassName="h-12 w-12"
-            textClassName="text-base"
-            textStyle={{ color: "oklch(var(--abl-green))" }}
-          />
-
-          {/* Header label pill */}
-          <div
-            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase"
-            style={{
-              background: "oklch(var(--abl-gold) / 0.1)",
-              border: "1px solid oklch(var(--abl-gold) / 0.3)",
-              color: "oklch(var(--abl-gold))",
-            }}
-          >
-            {lang === "en"
-              ? "Your Health Readiness Score"
-              : "आपका हेल्थ रेडीनेस स्कोर"}
+      {/* ── Main scrollable content ── */}
+      <div className="relative z-10 flex-1 py-6 px-4 pb-24">
+        <div className="max-w-lg mx-auto flex flex-col gap-6">
+          {/* Header pill */}
+          <div className="flex justify-center">
+            <div
+              className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase"
+              style={{
+                background: "oklch(var(--abl-gold) / 0.1)",
+                border: "1px solid oklch(var(--abl-gold) / 0.3)",
+                color: "oklch(var(--abl-gold))",
+              }}
+            >
+              {lang === "en"
+                ? "Your Health Readiness Score"
+                : "आपका हेल्थ रेडीनेस स्कोर"}
+            </div>
           </div>
 
-          {/* Main Score Card */}
+          {/* User greeting */}
+          {userName && (
+            <p
+              className="text-center font-display font-bold text-xl"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              {lang === "en" ? `Namaste, ${userName}!` : `नमस्ते, ${userName}!`}
+            </p>
+          )}
+
+          {/* ── R1: Main 3D Score Card + Full Gauge ── */}
           <div
-            data-ocid="result.card"
-            className="w-full rounded-2xl overflow-hidden shadow-md"
+            data-ocid="result.main_score_card"
+            className="w-full rounded-3xl overflow-hidden"
             style={{
               background: "white",
-              border: `2px solid ${cfg.border}`,
+              border: `2.5px solid ${totalZoneCfg.border}`,
+              boxShadow:
+                "0 4px 6px rgba(0,0,0,0.04), 0 10px 30px rgba(0,66,37,0.10), 0 20px 60px rgba(0,66,37,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
             }}
           >
-            {/* Top: Score number */}
-            <div className="py-8 px-6 flex flex-col items-center gap-1">
-              <span
-                className="font-display font-bold leading-none"
-                style={{ fontSize: "4.5rem", color: cfg.color }}
-              >
-                {result.totalScore}
-              </span>
-              <span
-                className="text-sm font-semibold"
-                style={{ color: "oklch(var(--abl-green-mid))" }}
-              >
-                {lang === "en" ? "out of 160" : "160 में से"}
-              </span>
+            {/* Card inner top gradient for 3D feel */}
+            <div
+              className="w-full"
+              style={{
+                background: `linear-gradient(180deg, ${totalZoneCfg.bg} 0%, white 40%)`,
+                padding: "1.5rem 1.5rem 0.5rem",
+              }}
+            >
+              {/* Category badge top */}
+              <div className="flex justify-center mb-4">
+                <span
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
+                  style={{
+                    background: totalZoneCfg.bg,
+                    border: `1px solid ${totalZoneCfg.border}`,
+                    color: totalZoneCfg.color,
+                  }}
+                >
+                  <span aria-hidden="true">{totalZoneCfg.emoji}</span>
+                  {lang === "en" ? totalZoneCfg.labelEN : totalZoneCfg.labelHI}
+                </span>
+              </div>
+
+              {/* Large Gauge Meter */}
+              <GaugeMeter value={result.totalScore} max={160} size={240} />
             </div>
 
-            {/* Divider */}
-            <div className="w-full h-px" style={{ background: cfg.border }} />
-
-            {/* Bottom: Category info */}
+            {/* Bottom info */}
             <div
-              className="py-6 px-6 flex flex-col items-center gap-2"
-              style={{ background: cfg.bg }}
+              className="px-6 py-5 flex flex-col items-center gap-2 text-center"
+              style={{
+                borderTop: `1px solid ${totalZoneCfg.border}`,
+                background: totalZoneCfg.bg,
+              }}
             >
-              <span className="text-3xl" aria-hidden="true">
-                {result.categoryEmoji}
-              </span>
-              <h2
-                className="font-display font-bold text-xl"
-                style={{ color: cfg.color }}
-              >
-                {result.categoryLabel}
-              </h2>
               <p
-                className="text-sm leading-relaxed"
+                className="text-sm leading-relaxed font-medium"
                 style={{ color: "oklch(var(--abl-green-mid))" }}
               >
                 {result.summaryMessage}
               </p>
+              {/* Zone label zones legend */}
+              <div className="flex items-center gap-3 mt-1">
+                {(
+                  [
+                    "needs_attention",
+                    "building_zone",
+                    "strong_area",
+                  ] as ZoneKey[]
+                ).map((z) => (
+                  <div key={z} className="flex items-center gap-1">
+                    <span className="text-xs" aria-hidden="true">
+                      {ZONE_CONFIG[z].emoji}
+                    </span>
+                    <span
+                      className="text-[10px] font-semibold"
+                      style={{ color: ZONE_CONFIG[z].color }}
+                    >
+                      {lang === "en"
+                        ? ZONE_CONFIG[z].labelEN
+                        : ZONE_CONFIG[z].labelHI}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Section 1 Result Card */}
-          <div className="w-full text-left">
+          {/* ── R2: Section Compact Cards ── */}
+          <div className="w-full">
             <p
               className="text-xs font-bold tracking-widest uppercase mb-3"
               style={{ color: "oklch(var(--abl-green-mid))" }}
             >
-              {lang === "en" ? "Section-wise Suggestions" : "भाग-वार सुझाव"}
+              {lang === "en" ? "Section-wise Scores" : "भाग-वार स्कोर"}
             </p>
-            <Section1ResultCard
-              answers={answers}
-              pillarScore={result.pillarScores.sleep}
-              lang={lang}
-            />
-            <div className="mt-4">
-              <Section2ResultCard
-                answers={answers}
-                pillarScore={result.pillarScores.gut}
-                lang={lang}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              {([0, 1, 2, 3] as const).map((idx) => (
+                <CompactSectionCard
+                  key={idx}
+                  sectionIndex={idx}
+                  sectionScore={sectionScores[idx]}
+                  answers={answers}
+                  lang={lang}
+                  suggestionsData={
+                    sectionSuggestions[idx] as QuestionSuggestions[]
+                  }
+                />
+              ))}
             </div>
           </div>
 
-          {/* Tagline pill */}
-          <div
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full"
-            style={{ background: "oklch(var(--abl-green))" }}
-          >
-            {["Clarity", "Correction", "Consistency"].map((word, i) => (
-              <span key={word} className="flex items-center gap-2">
-                <span
-                  className="text-xs font-bold tracking-widest uppercase"
-                  style={{ color: "white" }}
+          {/* ── R5: CTA Buttons ── */}
+          <div className="flex flex-col gap-3 pt-2">
+            {/* R4: PDF Generate + WhatsApp Share button */}
+            <button
+              type="button"
+              data-ocid="result.pdf_button"
+              onClick={generatePDF}
+              disabled={isGeneratingPDF}
+              className="w-full py-4 rounded-2xl text-sm font-bold tracking-wide uppercase inline-flex items-center justify-center gap-2 transition-all"
+              style={{
+                background: isGeneratingPDF
+                  ? "oklch(var(--abl-green) / 0.7)"
+                  : "oklch(var(--abl-green))",
+                color: "white",
+                boxShadow: "0 4px 16px rgba(0,66,37,0.3)",
+                cursor: isGeneratingPDF ? "not-allowed" : "pointer",
+              }}
+            >
+              {isGeneratingPDF ? (
+                /* Spinner */
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  aria-hidden="true"
+                  style={{
+                    animation: "spin 1s linear infinite",
+                  }}
                 >
-                  {word}
-                </span>
-                {i < 2 && (
-                  <span
-                    style={{ color: "oklch(var(--abl-gold))" }}
-                    aria-hidden="true"
-                  >
-                    ·
-                  </span>
-                )}
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
+              ) : (
+                /* PDF document icon */
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6zm2-6h8v1.5H8V14zm0-3h8v1.5H8V11zm0 6h5v1.5H8V17z" />
+                </svg>
+              )}
+              <span>
+                {isGeneratingPDF
+                  ? lang === "en"
+                    ? "Generating PDF..."
+                    : "PDF बन रही है..."
+                  : lang === "en"
+                    ? "Get My Full Report (PDF)"
+                    : "पूरी रिपोर्ट प्राप्त करें (PDF)"}
               </span>
-            ))}
+            </button>
+
+            {/* Consultation button */}
+            <button
+              type="button"
+              data-ocid="result.consultation_button"
+              onClick={() => {
+                const msg = encodeURIComponent(
+                  "Namaste, mujhe Dr. Suman Lal se 1-on-1 health consultation book karni hai.",
+                );
+                window.open(`https://wa.me/919199434365?text=${msg}`, "_blank");
+              }}
+              className="w-full py-4 rounded-2xl text-sm font-bold tracking-wide uppercase inline-flex items-center justify-center gap-2 transition-all"
+              style={{
+                background: "oklch(var(--abl-gold))",
+                color: "white",
+                boxShadow: "0 4px 16px rgba(158,107,61,0.3)",
+              }}
+            >
+              {/* WhatsApp SVG logo */}
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />
+              </svg>
+              <span>
+                {lang === "en"
+                  ? "Book 1-on-1 Consultation"
+                  : "1-on-1 परामर्श बुक करें"}
+              </span>
+            </button>
           </div>
 
-          {/* Back to Home button */}
+          {/* Tagline pill */}
+          <div className="flex justify-center">
+            <div
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full"
+              style={{ background: "oklch(var(--abl-green))" }}
+            >
+              {["Clarity", "Correction", "Consistency"].map((word, i) => (
+                <span key={word} className="flex items-center gap-2">
+                  <span
+                    className="text-xs font-bold tracking-widest uppercase"
+                    style={{ color: "white" }}
+                  >
+                    {word}
+                  </span>
+                  {i < 2 && (
+                    <span
+                      style={{ color: "oklch(var(--abl-gold))" }}
+                      aria-hidden="true"
+                    >
+                      ·
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Back to Home */}
           <button
             type="button"
             data-ocid="result.primary_button"
             onClick={onBack}
-            className="btn-green w-full py-4 rounded-2xl text-sm font-bold tracking-wide uppercase inline-flex items-center justify-center gap-2 shadow-wellness"
+            className="btn-green w-full py-4 rounded-2xl text-sm font-bold tracking-wide uppercase inline-flex items-center justify-center gap-2"
           >
             <ArrowLeft size={14} />
             <span>{lang === "en" ? "Back to Home" : "होम पर वापस जाएं"}</span>
@@ -1490,7 +2086,11 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
         result={scoreResult}
         answers={savedAnswers}
         lang={lang}
+        onLangToggle={() => setLang(lang === "en" ? "hi" : "en")}
         onBack={onBack}
+        userName={form.name}
+        userAge={form.age}
+        userGender={form.gender}
       />
     );
   }
