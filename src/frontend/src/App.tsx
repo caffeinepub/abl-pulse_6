@@ -157,12 +157,129 @@ function LeafDecor({
 }
 
 /* ─────────────────────────────────────────────
+   ADMIN DASHBOARD
+───────────────────────────────────────────── */
+function AdminDashboard({ onLogout }: { onLogout: () => void }) {
+  // Prevent body scroll
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, []);
+
+  return (
+    <div
+      data-ocid="admin.dashboard_page"
+      className="fixed inset-0 z-[900] flex flex-col"
+      style={{ background: "oklch(var(--abl-bg))" }}
+    >
+      {/* Top bar */}
+      <div
+        className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+        style={{
+          background: "oklch(var(--abl-green))",
+          borderBottom: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <LogoImage
+          imgClassName="h-8 w-8"
+          textClassName="text-base"
+          textStyle={{ color: "white" }}
+        />
+        <div className="flex items-center gap-2">
+          <span
+            className="text-xs font-semibold px-2 py-0.5 rounded-full"
+            style={{
+              background: "rgba(255,255,255,0.15)",
+              color: "rgba(255,255,255,0.9)",
+            }}
+          >
+            Admin Dashboard
+          </span>
+        </div>
+        <button
+          type="button"
+          data-ocid="admin.logout_button"
+          onClick={onLogout}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+          style={{
+            background: "rgba(255,255,255,0.15)",
+            color: "white",
+            border: "1px solid rgba(255,255,255,0.2)",
+          }}
+        >
+          <X size={14} />
+          Logout
+        </button>
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div
+          className="w-full max-w-md rounded-3xl p-8 flex flex-col items-center gap-5 text-center"
+          style={{
+            background: "white",
+            border: "1.5px solid oklch(var(--abl-green) / 0.15)",
+            boxShadow:
+              "0 4px 6px rgba(0,0,0,0.04), 0 10px 30px rgba(0,66,37,0.10)",
+          }}
+        >
+          <CheckCircle2
+            size={52}
+            style={{ color: "oklch(var(--abl-green))" }}
+          />
+          <div>
+            <h2
+              className="font-display font-bold text-2xl mb-2"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Admin Panel
+            </h2>
+            <p
+              className="text-sm leading-relaxed"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              Dashboard is being set up. Full access coming soon.
+            </p>
+          </div>
+          <span
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold"
+            style={{
+              background: "rgba(220,38,38,0.08)",
+              color: "#DC2626",
+              border: "1px solid rgba(220,38,38,0.2)",
+            }}
+          >
+            🔐 Logged in as Admin
+          </span>
+          <p className="text-xs" style={{ color: "oklch(var(--abl-border))" }}>
+            Health Seeker records, analytics, and export features will be
+            available here once the admin dashboard is fully built.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
    LOGIN MODAL
 ───────────────────────────────────────────── */
-function LoginModal({ onClose }: { onClose: () => void }) {
+type LoginRole = "hs" | "admin" | "hc";
+
+function LoginModal({
+  onClose,
+  onAdminLogin,
+}: {
+  onClose: () => void;
+  onAdminLogin?: () => void;
+}) {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [selectedRole, setSelectedRole] = useState<LoginRole>("hs");
+  const [loginError, setLoginError] = useState("");
 
   // Close on Escape key
   useEffect(() => {
@@ -181,6 +298,70 @@ function LoginModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
+  // Role config
+  const ROLE_CONFIG = {
+    hs: {
+      label: "Health Seeker",
+      badgeBg: "oklch(var(--abl-green) / 0.1)",
+      badgeBorder: "oklch(var(--abl-green) / 0.25)",
+      badgeColor: "oklch(var(--abl-green))",
+    },
+    admin: {
+      label: "Admin",
+      badgeBg: "rgba(220,38,38,0.08)",
+      badgeBorder: "rgba(220,38,38,0.22)",
+      badgeColor: "#DC2626",
+    },
+    hc: {
+      label: "Health Coach",
+      badgeBg: "oklch(var(--abl-gold) / 0.1)",
+      badgeBorder: "oklch(var(--abl-gold) / 0.28)",
+      badgeColor: "oklch(var(--abl-gold))",
+    },
+  } as const;
+
+  const roleCfg = ROLE_CONFIG[selectedRole];
+
+  const DUMMY_CREDS = {
+    admin: { email: "admin@ablpulse.in", password: "ABLAdmin@2025" },
+    hc: { email: "hc@ablpulse.in", password: "ABLHC@2025" },
+  } as const;
+
+  const handleLogin = () => {
+    setLoginError("");
+    if (selectedRole === "admin") {
+      if (
+        email === DUMMY_CREDS.admin.email &&
+        password === DUMMY_CREDS.admin.password
+      ) {
+        onClose();
+        onAdminLogin?.();
+      } else {
+        setLoginError(
+          "Invalid admin credentials. Please check email & password.",
+        );
+      }
+    } else if (selectedRole === "hc") {
+      if (
+        email === DUMMY_CREDS.hc.email &&
+        password === DUMMY_CREDS.hc.password
+      ) {
+        alert("HC Dashboard coming soon!");
+      } else {
+        setLoginError("Invalid Health Coach credentials.");
+      }
+    } else {
+      // HS — close modal (placeholder)
+      onClose();
+    }
+  };
+
+  const inputBaseStyle = {
+    border: "1.5px solid oklch(var(--abl-border))",
+    color: "oklch(var(--abl-green))",
+    background: "oklch(var(--abl-bg))",
+  };
+
   return (
     /* Backdrop */
     <div
@@ -191,7 +372,7 @@ function LoginModal({ onClose }: { onClose: () => void }) {
       }}
       data-ocid="login.dialog"
     >
-      {/* Click-outside to close (accessible via button, keyboard ESC handled in effect above) */}
+      {/* Click-outside to close */}
       <button
         type="button"
         className="absolute inset-0 w-full h-full cursor-default"
@@ -234,21 +415,79 @@ function LoginModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Body */}
-        <div className="px-6 pt-6 pb-7 flex flex-col gap-5">
-          <div>
-            <h2
-              id="login-title"
-              className="font-display font-bold text-xl mb-1"
-              style={{ color: "oklch(var(--abl-green))" }}
+        <div className="px-6 pt-5 pb-6 flex flex-col gap-4">
+          {/* Title + Role Badge */}
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h2
+                id="login-title"
+                className="font-display font-bold text-xl mb-0.5"
+                style={{ color: "oklch(var(--abl-green))" }}
+              >
+                Welcome Back
+              </h2>
+              <p
+                className="text-xs"
+                style={{ color: "oklch(var(--abl-border))" }}
+              >
+                Sign in to your ABL PULSE account
+              </p>
+            </div>
+            {/* Role badge */}
+            <span
+              className="flex-shrink-0 text-xs font-bold px-2.5 py-1 rounded-full mt-0.5"
+              style={{
+                background: roleCfg.badgeBg,
+                border: `1px solid ${roleCfg.badgeBorder}`,
+                color: roleCfg.badgeColor,
+              }}
             >
-              Welcome Back
-            </h2>
-            <p
-              className="text-sm"
-              style={{ color: "oklch(var(--abl-border))" }}
-            >
-              Sign in to your ABL PULSE account
-            </p>
+              {roleCfg.label}
+            </span>
+          </div>
+
+          {/* ── Role Selector Tabs ── */}
+          <div
+            className="flex gap-1.5 p-1 rounded-xl"
+            style={{
+              background: "oklch(var(--abl-bg))",
+              border: "1px solid oklch(var(--abl-border) / 0.5)",
+            }}
+          >
+            {(
+              [
+                { key: "hs", label: "HS", ocid: "login.role_hs_tab" },
+                { key: "admin", label: "Admin", ocid: "login.role_admin_tab" },
+                { key: "hc", label: "HC", ocid: "login.role_hc_tab" },
+              ] as const
+            ).map((r) => {
+              const isActive = selectedRole === r.key;
+              return (
+                <button
+                  key={r.key}
+                  type="button"
+                  data-ocid={r.ocid}
+                  onClick={() => {
+                    setSelectedRole(r.key);
+                    setEmail("");
+                    setPassword("");
+                    setLoginError("");
+                  }}
+                  className="flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all"
+                  style={{
+                    background: isActive
+                      ? "oklch(var(--abl-green))"
+                      : "transparent",
+                    color: isActive ? "white" : "oklch(var(--abl-green))",
+                    border: isActive
+                      ? "none"
+                      : "1px solid oklch(var(--abl-green) / 0.25)",
+                  }}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
           </div>
 
           {/* Email */}
@@ -263,17 +502,13 @@ function LoginModal({ onClose }: { onClose: () => void }) {
             <input
               id="login-email"
               type="email"
-              data-ocid="login.email_input"
+              data-ocid="login.input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               autoComplete="email"
-              className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all"
-              style={{
-                border: "1.5px solid oklch(var(--abl-border))",
-                color: "oklch(var(--abl-green))",
-                background: "oklch(var(--abl-bg))",
-              }}
+              className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+              style={inputBaseStyle}
               onFocus={(e) => {
                 e.currentTarget.style.borderColor = "oklch(var(--abl-green))";
                 e.currentTarget.style.boxShadow =
@@ -299,17 +534,13 @@ function LoginModal({ onClose }: { onClose: () => void }) {
               <input
                 id="login-password"
                 type={showPassword ? "text" : "password"}
-                data-ocid="login.password_input"
+                data-ocid="login.textarea"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 autoComplete="current-password"
-                className="w-full px-4 py-3 pr-11 rounded-xl text-sm outline-none transition-all"
-                style={{
-                  border: "1.5px solid oklch(var(--abl-border))",
-                  color: "oklch(var(--abl-green))",
-                  background: "oklch(var(--abl-bg))",
-                }}
+                className="w-full px-4 py-2.5 pr-11 rounded-xl text-sm outline-none transition-all"
+                style={inputBaseStyle}
                 onFocus={(e) => {
                   e.currentTarget.style.borderColor = "oklch(var(--abl-green))";
                   e.currentTarget.style.boxShadow =
@@ -333,17 +564,134 @@ function LoginModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
+          {/* Error message */}
+          {loginError && (
+            <p
+              className="text-xs rounded-lg px-3 py-2"
+              style={{
+                color: "#DC2626",
+                background: "rgba(220,38,38,0.07)",
+                border: "1px solid rgba(220,38,38,0.2)",
+              }}
+              data-ocid="login.error_state"
+            >
+              {loginError}
+            </p>
+          )}
+
           {/* Submit */}
           <button
             type="button"
             data-ocid="login.submit_button"
-            onClick={() => {
-              // placeholder — no backend wired yet
-            }}
-            className="btn-green w-full py-3.5 rounded-xl text-sm font-bold tracking-wide uppercase shadow-wellness mt-1"
+            onClick={handleLogin}
+            className="btn-green w-full py-3 rounded-xl text-sm font-bold tracking-wide uppercase shadow-wellness"
           >
             Login to ABL PULSE
           </button>
+
+          {/* Dummy Credentials Info Box — Admin */}
+          {selectedRole === "admin" && (
+            <div
+              data-ocid="login.credentials_info"
+              className="rounded-xl p-3 flex flex-col gap-2"
+              style={{
+                background: "oklch(var(--abl-gold) / 0.07)",
+                border: "1px solid oklch(var(--abl-gold) / 0.28)",
+              }}
+            >
+              <p
+                className="text-xs font-bold flex items-center gap-1.5"
+                style={{ color: "oklch(var(--abl-gold))" }}
+              >
+                🔑 Admin Demo Credentials
+              </p>
+              <div className="flex flex-col gap-0.5">
+                <p
+                  className="text-[11px]"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  <span className="font-semibold">Email:</span>{" "}
+                  {DUMMY_CREDS.admin.email}
+                </p>
+                <p
+                  className="text-[11px]"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  <span className="font-semibold">Password:</span>{" "}
+                  {DUMMY_CREDS.admin.password}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-ocid="login.use_credentials_button"
+                onClick={() => {
+                  setEmail(DUMMY_CREDS.admin.email);
+                  setPassword(DUMMY_CREDS.admin.password);
+                  setLoginError("");
+                }}
+                className="text-xs font-bold py-1.5 rounded-lg transition-all"
+                style={{
+                  background: "oklch(var(--abl-gold))",
+                  color: "white",
+                  border: "none",
+                }}
+              >
+                Use These Credentials
+              </button>
+            </div>
+          )}
+
+          {/* Dummy Credentials Info Box — HC */}
+          {selectedRole === "hc" && (
+            <div
+              data-ocid="login.credentials_info"
+              className="rounded-xl p-3 flex flex-col gap-2"
+              style={{
+                background: "oklch(var(--abl-gold) / 0.07)",
+                border: "1px solid oklch(var(--abl-gold) / 0.28)",
+              }}
+            >
+              <p
+                className="text-xs font-bold flex items-center gap-1.5"
+                style={{ color: "oklch(var(--abl-gold))" }}
+              >
+                🏥 Health Coach Demo Credentials
+              </p>
+              <div className="flex flex-col gap-0.5">
+                <p
+                  className="text-[11px]"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  <span className="font-semibold">Email:</span>{" "}
+                  {DUMMY_CREDS.hc.email}
+                </p>
+                <p
+                  className="text-[11px]"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  <span className="font-semibold">Password:</span>{" "}
+                  {DUMMY_CREDS.hc.password}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-ocid="login.use_credentials_button"
+                onClick={() => {
+                  setEmail(DUMMY_CREDS.hc.email);
+                  setPassword(DUMMY_CREDS.hc.password);
+                  setLoginError("");
+                }}
+                className="text-xs font-bold py-1.5 rounded-lg transition-all"
+                style={{
+                  background: "oklch(var(--abl-gold))",
+                  color: "white",
+                  border: "none",
+                }}
+              >
+                Use These Credentials
+              </button>
+            </div>
+          )}
 
           {/* Forgot note */}
           <p
@@ -938,8 +1286,11 @@ function GaugeMeter({
   if (fraction >= z2) scoreColor = green;
   else if (fraction >= z1) scoreColor = amber;
 
-  const svgH = cy + halfStroke + 4; // only top half + stroke
-  const viewH = svgH;
+  // Extend viewBox height to show score text below needle pivot
+  const viewH = cy + halfStroke + size * 0.38;
+
+  // End-cap label font size
+  const capFontSize = size * 0.07;
 
   return (
     <svg
@@ -988,6 +1339,32 @@ function GaugeMeter({
         opacity={0.9}
       />
 
+      {/* End-cap label: "0" at left arc end */}
+      <text
+        x={cx - r - halfStroke - 3}
+        y={cy + capFontSize * 0.9}
+        textAnchor="end"
+        fontSize={capFontSize}
+        fontWeight="700"
+        fill={red}
+        fontFamily="system-ui, sans-serif"
+      >
+        0
+      </text>
+
+      {/* End-cap label: max value at right arc end */}
+      <text
+        x={cx + r + halfStroke + 3}
+        y={cy + capFontSize * 0.9}
+        textAnchor="start"
+        fontSize={capFontSize}
+        fontWeight="700"
+        fill={green}
+        fontFamily="system-ui, sans-serif"
+      >
+        {max}
+      </text>
+
       {/* Needle */}
       <line
         x1={cx}
@@ -1003,10 +1380,10 @@ function GaugeMeter({
       <circle cx={cx} cy={cy} r={size * 0.045} fill="#1f2937" />
       <circle cx={cx} cy={cy} r={size * 0.025} fill="white" />
 
-      {/* Score text below needle pivot */}
+      {/* Score text well below needle pivot — no overlap */}
       <text
         x={cx}
-        y={cy + size * 0.12}
+        y={cy + size * 0.2}
         textAnchor="middle"
         fontSize={size * 0.145}
         fontWeight="800"
@@ -1017,7 +1394,7 @@ function GaugeMeter({
       </text>
       <text
         x={cx}
-        y={cy + size * 0.22}
+        y={cy + size * 0.32}
         textAnchor="middle"
         fontSize={size * 0.07}
         fontWeight="600"
@@ -1118,23 +1495,18 @@ const SECTION_OCIDS = [
 function CompactSectionCard({
   sectionIndex,
   sectionScore,
-  answers,
   lang,
   suggestionsData,
 }: {
   sectionIndex: 0 | 1 | 2 | 3;
   sectionScore: number;
-  answers: Record<string, number>;
   lang: Lang;
   suggestionsData: QuestionSuggestions[];
 }) {
-  // Determine if any answer in this section is 0 or 1
-  const hasAlert = Array.from({ length: 10 }, (_, qi) => {
-    const val = answers[`s${sectionIndex}-q${qi}`];
-    return val !== undefined && val <= 1;
-  }).some(Boolean);
-
   const zone = getSectionZone(sectionScore);
+
+  // Red Alert only when zone itself is needs_attention (score 0-13)
+  const hasAlert = zone === "needs_attention";
   const zoneCfg = ZONE_CONFIG[zone];
   const meta = SECTION_META[sectionIndex];
   const ocid = SECTION_OCIDS[sectionIndex];
@@ -1266,8 +1638,29 @@ function ResultScreen({
   ] as const;
 
   /* ── R3 + R4: PDF Generation via print window ── */
-  const generatePDF = () => {
+  const generatePDF = async () => {
     setIsGeneratingPDF(true);
+
+    // Helper: load image URL → base64 data URL so it renders in the print window
+    const loadImageAsDataURL = async (url: string): Promise<string> => {
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        return await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        return ""; // empty string → onerror hides the img
+      }
+    };
+
+    // Load images in parallel
+    const [logoDataURL, drSumanDataURL] = await Promise.all([
+      loadImageAsDataURL("/assets/uploads/ABL-Pulse-Logo-1.png"),
+      loadImageAsDataURL("/assets/uploads/Dr-Suman-Lal-2.png"),
+    ]);
 
     const today = new Date();
     const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
@@ -1298,6 +1691,13 @@ function ResultScreen({
       "Mind & Emotional Balance",
     ];
 
+    const sectionNamesHI = [
+      "नींद और हाइड्रेशन",
+      "गट क्लींज और मेटाबोलिक",
+      "मूवमेंट और सर्कुलेशन",
+      "माइंड और भावनात्मक संतुलन",
+    ];
+
     const sectionScoreArr = [
       result.pillarScores.sleep,
       result.pillarScores.gut,
@@ -1306,6 +1706,12 @@ function ResultScreen({
     ];
 
     const sectionNeedsAttention = [s1Items, s2Items, s3Items, s4Items];
+    const allSuggestionsData = [
+      SECTION1_SUGGESTIONS,
+      SECTION2_SUGGESTIONS,
+      SECTION3_SUGGESTIONS,
+      SECTION4_SUGGESTIONS,
+    ] as const;
 
     const getSectionZoneLabelColor = (score: number) => {
       if (score <= 13) return { label: "🔴 Needs Attention", color: "#DC2626" };
@@ -1313,11 +1719,71 @@ function ResultScreen({
       return { label: "🟢 Strong Area", color: "#004225" };
     };
 
-    const buildSectionHtml = (secIdx: number) => {
+    // Helper: get all zones suggestions for a section
+    const getSectionAllZoneSuggestions = (secIdx: number) => {
+      const suggestions = allSuggestionsData[
+        secIdx
+      ] as typeof SECTION1_SUGGESTIONS;
+      const buildingZoneItems: { label: string; text: string }[] = [];
+      const strongAreaItems: { label: string; text: string }[] = [];
+      for (let qi = 0; qi < 10; qi++) {
+        const score = answers[`s${secIdx}-q${qi}`] ?? 0;
+        const sugg = suggestions[qi];
+        if (score === 2) {
+          buildingZoneItems.push({
+            label: sugg.label,
+            text: lang === "en" ? sugg.building_zone.en : sugg.building_zone.hi,
+          });
+        } else if (score >= 3) {
+          strongAreaItems.push({
+            label: sugg.label,
+            text: lang === "en" ? sugg.strong_area.en : sugg.strong_area.hi,
+          });
+        }
+      }
+      return { buildingZoneItems, strongAreaItems };
+    };
+
+    // Build "What You Are Doing Well" section HTML (building + strong items)
+    const buildDoingWellHtml = () => {
+      let html = "";
+      for (let secIdx = 0; secIdx < 4; secIdx++) {
+        const { buildingZoneItems, strongAreaItems } =
+          getSectionAllZoneSuggestions(secIdx);
+        if (buildingZoneItems.length === 0 && strongAreaItems.length === 0)
+          continue;
+        const secName =
+          lang === "en" ? sectionNames[secIdx] : sectionNamesHI[secIdx];
+        html += `<div style="margin-bottom: 14px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fafffe; break-inside: avoid;">
+          <p style="font-size: 12px; font-weight: 700; color: #004225; margin: 0 0 8px 0;">${secName}</p>`;
+        if (buildingZoneItems.length > 0) {
+          html += `<p style="font-size: 10px; font-weight: 700; color: #D97706; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px;">🟡 Building Zone</p>
+          <ul style="margin: 0 0 8px 0; padding-left: 18px; list-style: disc;">
+            ${buildingZoneItems.map((item) => `<li style="font-size: 11px; color: #374151; margin-bottom: 3px; line-height: 1.5;">${item.text}</li>`).join("")}
+          </ul>`;
+        }
+        if (strongAreaItems.length > 0) {
+          html += `<p style="font-size: 10px; font-weight: 700; color: #004225; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px;">🟢 Strong Area</p>
+          <ul style="margin: 0; padding-left: 18px; list-style: disc;">
+            ${strongAreaItems.map((item) => `<li style="font-size: 11px; color: #374151; margin-bottom: 3px; line-height: 1.5;">${item.text}</li>`).join("")}
+          </ul>`;
+        }
+        html += "</div>";
+      }
+      if (!html) {
+        html = `<p style="font-size: 11px; color: #6b7280; font-style: italic;">Keep building consistent habits to see your strong areas grow!</p>`;
+      }
+      return html;
+    };
+
+    // Build "Areas to Focus On" section HTML (Needs Attention items)
+    const buildFocusHtml = (secIdx: number) => {
       const secScore = sectionScoreArr[secIdx];
       const { label: secZoneLabel, color: secZoneColor } =
         getSectionZoneLabelColor(secScore);
       const naItems = sectionNeedsAttention[secIdx];
+      const secName =
+        lang === "en" ? sectionNames[secIdx] : sectionNamesHI[secIdx];
       const naHtml =
         naItems.length > 0
           ? `<ul style="margin: 6px 0 0 0; padding-left: 18px; list-style: disc;">${naItems
@@ -1332,21 +1798,63 @@ function ResultScreen({
         <div style="margin-bottom: 14px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: white; break-inside: avoid;">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
             <div>
-              <p style="font-size: 13px; font-weight: 700; color: #004225; margin: 0;">${sectionNames[secIdx]}</p>
+              <p style="font-size: 13px; font-weight: 700; color: #004225; margin: 0;">${secName}</p>
               <p style="font-size: 11px; color: #6b7280; margin: 2px 0 0 0;">Score: ${secScore}/40</p>
             </div>
             <span style="font-size: 11px; font-weight: 700; color: ${secZoneColor}; background: ${secZoneColor}20; padding: 3px 8px; border-radius: 20px;">${secZoneLabel}</span>
           </div>
-          ${
-            naItems.length > 0
-              ? `<p style="font-size: 11px; font-weight: 700; color: #DC2626; margin: 8px 0 2px 0;">Needs Attention:</p>${naHtml}`
-              : naHtml
-          }
+          ${naItems.length > 0 ? `<p style="font-size: 11px; font-weight: 700; color: #DC2626; margin: 8px 0 2px 0;">🔴 Needs Attention:</p>${naHtml}` : naHtml}
         </div>`;
     };
 
-    const logoUrl = `${window.location.origin}/assets/uploads/ABL-Pulse-Logo-1.png`;
-    const drSumanUrl = `${window.location.origin}/assets/uploads/Dr-Suman-Lal-2.png`;
+    // Section summary table rows
+    const sectionTableRows = [0, 1, 2, 3]
+      .map((i) => {
+        const { label, color } = getSectionZoneLabelColor(sectionScoreArr[i]);
+        const secName = lang === "en" ? sectionNames[i] : sectionNamesHI[i];
+        return `<tr>
+          <td style="padding: 8px; font-size: 11px; color: #1f2937; border: 1px solid #e5e7eb;">${secName}</td>
+          <td style="padding: 8px; text-align: center; font-size: 11px; font-weight: 700; color: #004225; border: 1px solid #e5e7eb;">${sectionScoreArr[i]}/40</td>
+          <td style="padding: 8px; text-align: center; font-size: 11px; font-weight: 700; color: ${color}; border: 1px solid #e5e7eb;">${label}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const logoImgTag = logoDataURL
+      ? `<img class="header-logo" src="${logoDataURL}" alt="ABL Pulse" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div style="display:none;width:56px;height:56px;background:#004225;border-radius:8px;align-items:center;justify-content:center;color:white;font-weight:800;font-size:10px;flex-shrink:0;">ABL</div>`
+      : `<div style="width:56px;height:56px;background:#004225;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:10px;flex-shrink:0;">ABL</div>`;
+
+    const drImgTag = drSumanDataURL
+      ? `<img class="footer-dr-img" src="${drSumanDataURL}" alt="Dr. Suman Lal" />`
+      : `<div style="width:48px;height:48px;border-radius:50%;background:#e5e7eb;border:2px solid #004225;"></div>`;
+
+    const sharedHeader = `
+  <div class="header">
+    ${logoImgTag}
+    <div class="header-text">
+      <div class="header-title">ABL PULSE</div>
+      <div class="header-subtitle">Ayurved Banaye Life</div>
+      <div class="header-address">Old Museum South Wall, Dak-bangla Churaha, Near Kotwali Thana, Patna 1</div>
+      <div class="header-contact">📞 WhatsApp / Call: +91 9199434365</div>
+    </div>
+  </div>`;
+
+    const sharedFooter = `
+  <div class="footer">
+    <div class="footer-sig">
+      ${drImgTag}
+      <div>
+        <div class="footer-name">Dr. Suman Lal</div>
+        <div class="footer-desig">Naturopathy Practitioner | Doctorate in Psychology</div>
+        <div style="font-size:9px;color:#6b7280;margin-top:2px;font-style:italic;">Authorized Signature</div>
+      </div>
+    </div>
+    <div class="footer-brand">
+      <div class="footer-brand-name">ABL PULSE</div>
+      <div class="footer-brand-tagline">Ayurved Banaye Life</div>
+      <div class="footer-date">Generated: ${dateStr}</div>
+    </div>
+  </div>`;
 
     const htmlContent = `<!DOCTYPE html>
 <html lang="en">
@@ -1357,7 +1865,7 @@ function ResultScreen({
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page {
       size: A4;
-      margin: 15mm 18mm 18mm 18mm;
+      margin: 20mm;
     }
     body {
       font-family: 'Segoe UI', Arial, sans-serif;
@@ -1381,7 +1889,7 @@ function ResultScreen({
     .header-subtitle { font-size: 11px; color: #9E6B3D; font-weight: 600; margin-top: 2px; }
     .header-address { font-size: 10px; color: #6b7280; margin-top: 4px; line-height: 1.4; }
     .header-contact { font-size: 10.5px; color: #004225; font-weight: 700; margin-top: 3px; }
-    
+
     .section-title {
       font-size: 12px;
       font-weight: 800;
@@ -1446,17 +1954,10 @@ function ResultScreen({
   </style>
 </head>
 <body>
+
+<!-- ══════════════ PAGE 1 ══════════════ -->
 <div class="page">
-  <!-- HEADER -->
-  <div class="header">
-    <img class="header-logo" src="${logoUrl}" alt="ABL Pulse" onerror="this.style.display='none'" />
-    <div class="header-text">
-      <div class="header-title">ABL PULSE</div>
-      <div class="header-subtitle">Ayurved Banaye Life</div>
-      <div class="header-address">Old Museum South Wall, Dak-bangla Churaha, Near Kotwali Thana, Patna 1</div>
-      <div class="header-contact">📞 WhatsApp / Call: +91 9199434365</div>
-    </div>
-  </div>
+  ${sharedHeader}
 
   <!-- HEALTH SEEKER DETAILS -->
   <div class="section-title">Health Seeker Details</div>
@@ -1489,33 +1990,46 @@ function ResultScreen({
     <div class="score-zone" style="color: ${zoneColor};">${zoneLabel}</div>
   </div>
 
-  <!-- SECTION-WISE REPORT -->
-  <div class="section-title">Section-wise Report</div>
-  ${[0, 1, 2, 3].map((i) => buildSectionHtml(i)).join("")}
+  <!-- SECTION SUMMARY TABLE -->
+  <div class="section-title">Section-wise Summary</div>
+  <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
+    <thead>
+      <tr style="background: #f9fafb;">
+        <th style="padding: 8px; text-align: left; font-size: 11px; color: #6b7280; border: 1px solid #e5e7eb;">Section</th>
+        <th style="padding: 8px; text-align: center; font-size: 11px; color: #6b7280; border: 1px solid #e5e7eb;">Score</th>
+        <th style="padding: 8px; text-align: center; font-size: 11px; color: #6b7280; border: 1px solid #e5e7eb;">Zone</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${sectionTableRows}
+    </tbody>
+  </table>
+
+  <!-- WHAT YOU ARE DOING WELL -->
+  <div class="section-title" style="break-before: avoid;">✅ What You Are Doing Well</div>
+  <div style="break-inside: avoid;">
+  ${buildDoingWellHtml()}
+  </div>
+</div>
+
+<!-- ══════════════ PAGE 2 ══════════════ -->
+<div style="page-break-before: always;" class="page">
+  ${sharedHeader}
+
+  <!-- AREAS TO FOCUS ON -->
+  <div class="section-title" style="margin-top: 0; margin-bottom: 10px;">🔴 Areas to Focus On</div>
+  ${[0, 1, 2, 3].map((i) => buildFocusHtml(i)).join("")}
 
   <!-- EXPERT CTA -->
   <div class="expert-cta">
-    <div class="expert-cta-title">🎯 1-on-1 Expert Consultation</div>
-    <div class="expert-cta-body">Apne Readiness Gap ko samajhne ke liye Dr. Suman Lal se 1-on-1 consultation book karein. Personalized guidance based on your health assessment report.</div>
-    <div class="expert-cta-contact">📱 WhatsApp: +91 9199434365</div>
+    <div class="expert-cta-title">🎯 1-on-1 Expert Consultation with Dr. Suman Lal</div>
+    <div class="expert-cta-body">Apne Readiness Gap ko samajhne ke liye Dr. Suman Lal se 1-on-1 consultation book karein. Aapki assessment report ke basis par personalized guidance milegi jo aapki journey ko accelerate karegi.</div>
+    <div class="expert-cta-contact">📱 WhatsApp / Call: +91 9199434365</div>
   </div>
 
-  <!-- FOOTER -->
-  <div class="footer">
-    <div class="footer-sig">
-      <img class="footer-dr-img" src="${drSumanUrl}" alt="Dr. Suman Lal" onerror="this.style.display='none'" />
-      <div>
-        <div class="footer-name">Dr. Suman Lal</div>
-        <div class="footer-desig">Naturopathy Practitioner | Doctorate in Psychology</div>
-      </div>
-    </div>
-    <div class="footer-brand">
-      <div class="footer-brand-name">ABL PULSE</div>
-      <div class="footer-brand-tagline">Ayurved Banaye Life</div>
-      <div class="footer-date">Generated: ${dateStr}</div>
-    </div>
-  </div>
+  ${sharedFooter}
 </div>
+
 </body>
 </html>`;
 
@@ -1529,19 +2043,39 @@ function ResultScreen({
     printWindow.document.write(htmlContent);
     printWindow.document.close();
 
-    // Wait for images to load before printing
+    // Wait for all images to load before printing
+    const triggerPrint = () => {
+      setIsGeneratingPDF(false);
+      printWindow.focus();
+      printWindow.print();
+      const score = result.totalScore;
+      const waMsg = encodeURIComponent(
+        `Namaste, mujhe mera ABL PULSE Health Report share karna hai. Mera Score: ${score}/160`,
+      );
+      window.open(`https://wa.me/919199434365?text=${waMsg}`, "_blank");
+    };
+
     printWindow.onload = () => {
-      setTimeout(() => {
-        setIsGeneratingPDF(false);
-        printWindow.focus();
-        printWindow.print();
-        // After printing, open WhatsApp
-        const score = result.totalScore;
-        const waMsg = encodeURIComponent(
-          `Namaste, mujhe mera ABL PULSE Health Report share karna hai. Mera Score: ${score}/160`,
-        );
-        window.open(`https://wa.me/919199434365?text=${waMsg}`, "_blank");
-      }, 800);
+      const imgs = printWindow.document.querySelectorAll("img");
+      if (imgs.length === 0) {
+        setTimeout(triggerPrint, 500);
+        return;
+      }
+      let loaded = 0;
+      const onDone = () => {
+        loaded++;
+        if (loaded >= imgs.length) setTimeout(triggerPrint, 400);
+      };
+      for (const img of Array.from(imgs)) {
+        if (img.complete) {
+          onDone();
+        } else {
+          img.addEventListener("load", onDone);
+          img.addEventListener("error", onDone);
+        }
+      }
+      // Safety fallback in case events don't fire
+      setTimeout(triggerPrint, 2500);
     };
   };
 
@@ -1750,7 +2284,6 @@ function ResultScreen({
                   key={idx}
                   sectionIndex={idx}
                   sectionScore={sectionScores[idx]}
-                  answers={answers}
                   lang={lang}
                   suggestionsData={
                     sectionSuggestions[idx] as QuestionSuggestions[]
@@ -1852,44 +2385,6 @@ function ResultScreen({
               </span>
             </button>
           </div>
-
-          {/* Tagline pill */}
-          <div className="flex justify-center">
-            <div
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full"
-              style={{ background: "oklch(var(--abl-green))" }}
-            >
-              {["Clarity", "Correction", "Consistency"].map((word, i) => (
-                <span key={word} className="flex items-center gap-2">
-                  <span
-                    className="text-xs font-bold tracking-widest uppercase"
-                    style={{ color: "white" }}
-                  >
-                    {word}
-                  </span>
-                  {i < 2 && (
-                    <span
-                      style={{ color: "oklch(var(--abl-gold))" }}
-                      aria-hidden="true"
-                    >
-                      ·
-                    </span>
-                  )}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Back to Home */}
-          <button
-            type="button"
-            data-ocid="result.primary_button"
-            onClick={onBack}
-            className="btn-green w-full py-4 rounded-2xl text-sm font-bold tracking-wide uppercase inline-flex items-center justify-center gap-2"
-          >
-            <ArrowLeft size={14} />
-            <span>{lang === "en" ? "Back to Home" : "होम पर वापस जाएं"}</span>
-          </button>
         </div>
       </div>
     </div>
@@ -3707,16 +4202,23 @@ const navItems = [
 function BottomAppBar({
   activeSection,
   onAssessment,
+  currentPage,
 }: {
   activeSection: string;
   onAssessment: () => void;
+  currentPage: "home" | "assessment";
 }) {
   return (
     <nav className="bottom-nav md:hidden" aria-label="Mobile navigation">
       <div className="flex items-stretch justify-around h-[60px]">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = activeSection === item.id;
+          // When on assessment page, highlight Assessment tab
+          // When on home page, use scroll-based active section (default to "home")
+          const isActive =
+            currentPage === "assessment"
+              ? item.isAssessment
+              : item.id === (activeSection || "home");
           return (
             <button
               type="button"
@@ -3850,6 +4352,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState<"home" | "assessment">("home");
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
 
   const sectionIds = [
     "home",
@@ -3886,9 +4389,20 @@ export default function App() {
       {/* Assessment page (full-screen overlay) */}
       {currentPage === "assessment" && <AssessmentPage onBack={goHome} />}
 
+      {/* Admin Dashboard (full-screen overlay) */}
+      {showAdminDashboard && (
+        <AdminDashboard onLogout={() => setShowAdminDashboard(false)} />
+      )}
+
       {/* Login modal (on top of everything) */}
       {loginModalOpen && (
-        <LoginModal onClose={() => setLoginModalOpen(false)} />
+        <LoginModal
+          onClose={() => setLoginModalOpen(false)}
+          onAdminLogin={() => {
+            setLoginModalOpen(false);
+            setShowAdminDashboard(true);
+          }}
+        />
       )}
 
       {/* Main landing page — always rendered, hidden behind assessment overlay */}
@@ -3915,6 +4429,7 @@ export default function App() {
       <BottomAppBar
         activeSection={activeSection}
         onAssessment={goToAssessment}
+        currentPage={currentPage}
       />
 
       {/* WhatsApp float — on desktop bottom: 24px, on mobile above bottom bar */}
