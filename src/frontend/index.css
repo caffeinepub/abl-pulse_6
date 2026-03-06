@@ -1,0 +1,245 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ABL PULSE — Wellness Brand Design System */
+/* Using OKLCH color tokens mapped from brand hex values */
+/* #004225 -> oklch(0.28 0.095 155) deep forest green */
+/* #9E6B3D -> oklch(0.53 0.1 55)   warm gold/brown    */
+/* #4C785C -> oklch(0.47 0.075 155) secondary green    */
+/* #FAF7F2 -> oklch(0.977 0.012 85) warm off-white bg  */
+/* #F5F2EE -> oklch(0.962 0.012 85) card background    */
+/* #A7B8A8 -> oklch(0.73 0.04 155)  muted green border */
+/* #C58F58 -> oklch(0.65 0.115 58)  progress filled    */
+
+/* Self-hosted font declarations (Figtree + Fraunces as display) */
+/* Using General Sans equivalent from available fonts */
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+
+    /* Core Brand Palette */
+    --abl-green:        0.28 0.095 155;
+    --abl-gold:         0.53 0.10  55;
+    --abl-green-mid:    0.47 0.075 155;
+    --abl-bg:           0.977 0.012 85;
+    --abl-card:         0.962 0.012 85;
+    --abl-border:       0.73 0.04  155;
+    --abl-progress:     0.65 0.115 58;
+    --abl-dark:         0.18 0.06  155;
+
+    /* Shadcn token overrides — wellness palette */
+    --background:       0.977 0.012 85;
+    --foreground:       0.20 0.05  155;
+    --card:             0.962 0.012 85;
+    --card-foreground:  0.20 0.05  155;
+    --popover:          0.977 0.012 85;
+    --popover-foreground: 0.20 0.05 155;
+    --primary:          0.28 0.095 155;
+    --primary-foreground: 0.977 0.012 85;
+    --secondary:        0.47 0.075 155;
+    --secondary-foreground: 0.977 0.012 85;
+    --muted:            0.94 0.012 85;
+    --muted-foreground: 0.55 0.03  155;
+    --accent:           0.53 0.10  55;
+    --accent-foreground: 0.977 0.012 85;
+    --destructive:      0.577 0.245 27.325;
+    --destructive-foreground: 0.985 0 0;
+    --border:           0.73 0.04  155;
+    --input:            0.85 0.025 155;
+    --ring:             0.28 0.095 155;
+    --chart-1:          0.28 0.095 155;
+    --chart-2:          0.53 0.10  55;
+    --chart-3:          0.47 0.075 155;
+    --chart-4:          0.65 0.115 58;
+    --chart-5:          0.73 0.04  155;
+    --sidebar:          0.977 0.012 85;
+    --sidebar-foreground: 0.20 0.05 155;
+    --sidebar-primary:  0.28 0.095 155;
+    --sidebar-primary-foreground: 0.977 0.012 85;
+    --sidebar-accent:   0.94 0.012 85;
+    --sidebar-accent-foreground: 0.20 0.05 155;
+    --sidebar-border:   0.73 0.04  155;
+    --sidebar-ring:     0.28 0.095 155;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Figtree', 'General Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ──────────────────────────────────────────────
+   Scroll-reveal animation
+────────────────────────────────────────────── */
+@layer utilities {
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.65s ease, transform 0.65s ease;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .reveal-delay-1 { transition-delay: 0.1s; }
+  .reveal-delay-2 { transition-delay: 0.2s; }
+  .reveal-delay-3 { transition-delay: 0.3s; }
+  .reveal-delay-4 { transition-delay: 0.4s; }
+
+  /* Hero gradient shimmer */
+  .hero-gradient {
+    background: linear-gradient(
+      160deg,
+      oklch(0.97 0.015 85) 0%,
+      oklch(0.95 0.022 115) 45%,
+      oklch(0.93 0.028 140) 100%
+    );
+  }
+
+  /* Organic leaf decoration */
+  .leaf-accent {
+    position: absolute;
+    border-radius: 60% 40% 70% 30% / 50% 60% 40% 60%;
+  }
+
+  /* Bottom nav active dot */
+  .nav-dot::after {
+    content: '';
+    display: block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: oklch(var(--abl-green));
+    margin: 2px auto 0;
+  }
+
+  /* Green section atmosphere */
+  .green-section {
+    background: linear-gradient(
+      135deg,
+      oklch(var(--abl-green)) 0%,
+      oklch(var(--abl-green-mid)) 100%
+    );
+  }
+
+  /* Primary CTA button (deep green) */
+  .btn-gold {
+    background: oklch(var(--abl-green));
+    color: white;
+    transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+  }
+  .btn-gold:hover {
+    background: oklch(0.23 0.09 155);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px oklch(var(--abl-green) / 0.40);
+  }
+  .btn-gold:active {
+    transform: translateY(0);
+  }
+
+  /* Green CTA button */
+  .btn-green {
+    background: oklch(var(--abl-green));
+    color: white;
+    transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+  }
+  .btn-green:hover {
+    background: oklch(0.23 0.09 155);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px oklch(var(--abl-green) / 0.35);
+  }
+
+  /* Card wellness style */
+  .wellness-card {
+    background: white;
+    border: 1.5px solid oklch(var(--abl-green) / 0.2);
+    border-radius: 1rem;
+    box-shadow: 0 2px 12px oklch(var(--abl-green) / 0.06);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+  }
+  .wellness-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px oklch(var(--abl-green) / 0.15);
+    border-color: oklch(var(--abl-green) / 0.35);
+  }
+
+  /* Framework step number */
+  .step-number {
+    font-size: 2.5rem;
+    font-weight: 800;
+    line-height: 1;
+    color: oklch(var(--abl-green) / 0.25);
+    font-family: 'Fraunces', Georgia, serif;
+  }
+  .step-number-accent {
+    color: oklch(var(--abl-green));
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+
+  /* Dotted connector line (desktop) */
+  .step-connector {
+    border-top: 2px dashed oklch(var(--abl-border));
+    flex: 1;
+    margin-top: 2rem;
+  }
+
+  /* WhatsApp float */
+  .whatsapp-float {
+    position: fixed;
+    right: 1.25rem;
+    z-index: 1000;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #25D366;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 16px rgba(37, 211, 102, 0.45);
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .whatsapp-float:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 24px rgba(37, 211, 102, 0.55);
+  }
+
+  /* Bottom nav mobile */
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 900;
+    background: white;
+    border-top: 1px solid oklch(var(--abl-border));
+    box-shadow: 0 -4px 20px oklch(var(--abl-green) / 0.08);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Section padding rhythm */
+  .section-pad {
+    padding-top: 4rem;
+    padding-bottom: 4rem;
+  }
+  @media (min-width: 768px) {
+    .section-pad {
+      padding-top: 6rem;
+      padding-bottom: 6rem;
+    }
+  }
+}
