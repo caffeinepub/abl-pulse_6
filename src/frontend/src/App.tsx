@@ -1,4 +1,8 @@
-import jsPDF from "jspdf";
+// jsPDF loaded via CDN script in index.html (window.jspdf)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const window: Window & {
+  jspdf: { jsPDF: new (...args: unknown[]) => unknown };
+};
 import {
   Activity,
   ArrowLeft,
@@ -1659,7 +1663,7 @@ function LoginModal({
                 scrollToSection("footer");
               }}
             >
-              Contact Us
+              support@ablpulse.com
             </button>
           </p>
         </div>
@@ -2616,14 +2620,19 @@ function ResultScreen({
   const generatePDF = async () => {
     setIsGeneratingPDF(true);
 
-    // Helper: load image URL → base64 data URL
+    // Helper: load image URL → base64 data URL with timeout
     const loadImageAsDataURL = async (url: string): Promise<string> => {
       try {
-        const response = await fetch(url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!response.ok) return "";
         const blob = await response.blob();
         return await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => resolve("");
           reader.readAsDataURL(blob);
         });
       } catch {
@@ -2631,7 +2640,16 @@ function ResultScreen({
       }
     };
 
-    // Load images in parallel
+    // Check jsPDF is available before loading images
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const JsPDFClass = (window as any).jspdf?.jsPDF ?? (window as any).jsPDF;
+    if (!JsPDFClass) {
+      setIsGeneratingPDF(false);
+      alert("PDF library not loaded yet. Please wait a moment and try again.");
+      return;
+    }
+
+    // Load images in parallel (non-blocking — failures handled gracefully)
     const [logoDataURL, drSumanDataURL] = await Promise.all([
       loadImageAsDataURL("/assets/uploads/ABL-Pulse-Logo-1.png"),
       loadImageAsDataURL("/assets/uploads/Dr-Suman-Lal-2.png"),
@@ -2707,7 +2725,8 @@ function ResultScreen({
 
     // ── Build jsPDF document ──
     try {
-      const doc = new jsPDF({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc: any = new JsPDFClass({
         orientation: "portrait",
         unit: "mm",
         format: "a4",
@@ -4236,12 +4255,16 @@ function Navbar({
   onAssessment,
   onLogin,
   onServices,
+  onAbout,
+  onContact,
 }: {
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (v: boolean) => void;
   onAssessment: () => void;
   onLogin: () => void;
   onServices: () => void;
+  onAbout: () => void;
+  onContact: () => void;
 }) {
   const [scrolled, setScrolled] = useState(false);
 
@@ -4252,25 +4275,45 @@ function Navbar({
   }, []);
 
   const links = [
-    { label: "Home", id: "home", isAssessment: false, isServices: false },
+    {
+      label: "Home",
+      id: "home",
+      isAssessment: false,
+      isServices: false,
+      isAbout: false,
+      isContact: false,
+    },
     {
       label: "Assessment",
       id: "assessment",
       isAssessment: true,
       isServices: false,
+      isAbout: false,
+      isContact: false,
     },
     {
       label: "Services",
       id: "framework",
       isAssessment: false,
       isServices: true,
+      isAbout: false,
+      isContact: false,
     },
-    { label: "About Us", id: "trust", isAssessment: false, isServices: false },
     {
-      label: "Contact Us",
-      id: "footer",
+      label: "About Us",
+      id: "trust",
       isAssessment: false,
       isServices: false,
+      isAbout: true,
+      isContact: false,
+    },
+    {
+      label: "Contact Us",
+      id: "contact",
+      isAssessment: false,
+      isServices: false,
+      isAbout: false,
+      isContact: true,
     },
   ];
 
@@ -4317,6 +4360,10 @@ function Navbar({
                   onAssessment();
                 } else if (l.isServices) {
                   onServices();
+                } else if (l.isAbout) {
+                  onAbout();
+                } else if (l.isContact) {
+                  onContact();
                 } else {
                   scrollToSection(l.id);
                 }
@@ -4399,6 +4446,10 @@ function Navbar({
                     onAssessment();
                   } else if (l.isServices) {
                     onServices();
+                  } else if (l.isAbout) {
+                    onAbout();
+                  } else if (l.isContact) {
+                    onContact();
                   } else {
                     scrollToSection(l.id);
                   }
@@ -5172,18 +5223,17 @@ function PreFooterCTA({ onAssessment }: { onAssessment: () => void }) {
 function Footer({
   onAssessment,
   onLogin,
+  onServices,
+  onAbout,
+  onContact,
 }: {
   onAssessment: () => void;
   onLogin: () => void;
+  onServices: () => void;
+  onAbout: () => void;
+  onContact: () => void;
 }) {
   const year = new Date().getFullYear();
-
-  const quickLinks = [
-    { label: "Home", id: "home", isAssessment: false },
-    { label: "Assessment", id: "assessment", isAssessment: true },
-    { label: "Services", id: "framework", isAssessment: false },
-    { label: "About Us", id: "trust", isAssessment: false },
-  ];
 
   return (
     <footer
@@ -5224,25 +5274,50 @@ function Footer({
               Quick Links
             </h4>
             <ul className="flex flex-col gap-2.5">
-              {quickLinks.map((l) => (
-                <li key={l.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (l.isAssessment) {
-                        onAssessment();
-                      } else {
-                        scrollToSection(l.id);
-                      }
-                    }}
-                    className="text-sm hover:text-white transition-colors"
-                    style={{ color: "rgba(255,255,255,0.7)" }}
-                    data-ocid={`footer.${l.id}_link`}
-                  >
-                    {l.label}
-                  </button>
-                </li>
-              ))}
+              <li>
+                <button
+                  type="button"
+                  onClick={() => scrollToSection("home")}
+                  className="text-sm hover:text-white transition-colors"
+                  style={{ color: "rgba(255,255,255,0.7)" }}
+                  data-ocid="footer.home_link"
+                >
+                  Home
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={onAssessment}
+                  className="text-sm hover:text-white transition-colors"
+                  style={{ color: "rgba(255,255,255,0.7)" }}
+                  data-ocid="footer.assessment_link"
+                >
+                  Assessment
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={onServices}
+                  className="text-sm hover:text-white transition-colors"
+                  style={{ color: "rgba(255,255,255,0.7)" }}
+                  data-ocid="footer.services_link"
+                >
+                  Services
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={onAbout}
+                  className="text-sm hover:text-white transition-colors"
+                  style={{ color: "rgba(255,255,255,0.7)" }}
+                  data-ocid="footer.about_link"
+                >
+                  About Us
+                </button>
+              </li>
             </ul>
           </div>
 
@@ -5292,7 +5367,7 @@ function Footer({
                 <button
                   type="button"
                   data-ocid="footer.contact_link"
-                  onClick={() => scrollToSection("footer")}
+                  onClick={onContact}
                   className="text-sm hover:text-white transition-colors"
                   style={{ color: "rgba(255,255,255,0.7)" }}
                 >
@@ -5622,8 +5697,548 @@ function ServicesPage({
 }
 
 /* ─────────────────────────────────────────────
-   BOTTOM APP BAR (Mobile)
+   ABOUT US PAGE
 ───────────────────────────────────────────── */
+function AboutUsPage({ onBack }: { onBack: () => void }) {
+  const coreValues = [
+    {
+      title: "Education First",
+      description:
+        "Before suggesting any correction, we help you understand your health gap. Awareness creates direction.",
+    },
+    {
+      title: "Structured Improvement",
+      description:
+        "We don't give random advice. Every step is based on your readiness category — High, Moderate, or Low.",
+    },
+    {
+      title: "Sustainable Lifestyle Design",
+      description:
+        "No crash changes. Only practical, small corrections that fit your real routine.",
+    },
+    {
+      title: "Accessible First Step",
+      description:
+        "Your Health Readiness Score is free — Because understanding your body should not be complicated.",
+    },
+  ];
+
+  return (
+    <div
+      data-ocid="about.page"
+      className="fixed inset-0 z-[900] flex flex-col overflow-hidden"
+      style={{ background: "oklch(var(--abl-bg))" }}
+    >
+      {/* Decorative background */}
+      <div
+        className="absolute inset-0 pointer-events-none overflow-hidden"
+        aria-hidden="true"
+      >
+        <LeafDecor className="top-0 right-0" size={200} opacity={0.05} />
+        <LeafDecor
+          className="bottom-40 left-0 rotate-180"
+          size={160}
+          opacity={0.04}
+        />
+      </div>
+
+      {/* Sticky Top Bar */}
+      <div
+        className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 flex-shrink-0"
+        style={{
+          background: "white",
+          borderBottom: "1px solid oklch(var(--abl-border))",
+        }}
+      >
+        <button
+          type="button"
+          data-ocid="about.back_button"
+          onClick={onBack}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
+          style={{
+            color: "oklch(var(--abl-green))",
+            background: "oklch(var(--abl-green) / 0.08)",
+            border: "1px solid oklch(var(--abl-green) / 0.2)",
+          }}
+        >
+          <ArrowLeft size={15} />
+          <span className="hidden sm:inline">Back</span>
+        </button>
+        <LogoImage
+          imgClassName="h-8 w-8"
+          textClassName="text-sm"
+          textStyle={{ color: "oklch(var(--abl-green))" }}
+        />
+        <div className="w-[68px]" aria-hidden="true" />
+      </div>
+
+      {/* Scrollable Content */}
+      <div className="relative z-10 flex-1 overflow-y-auto pb-[80px] md:pb-8">
+        <div className="max-w-2xl mx-auto px-4 pt-8 pb-6">
+          {/* Page Heading */}
+          <div className="text-center mb-8">
+            <h1
+              className="font-display font-bold text-2xl sm:text-3xl leading-tight mb-3"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              About ABL Pulse
+            </h1>
+            <p
+              className="text-base sm:text-lg font-semibold leading-snug"
+              style={{ color: "oklch(var(--abl-gold))" }}
+            >
+              ABL Care is a Structured Lifestyle Readiness Platform.
+            </p>
+          </div>
+
+          {/* Intro paragraphs */}
+          <div
+            className="rounded-2xl p-5 mb-6 flex flex-col gap-3"
+            style={{
+              background: "white",
+              border: "1.5px solid oklch(var(--abl-green) / 0.15)",
+              boxShadow: "0 2px 12px oklch(var(--abl-green) / 0.06)",
+            }}
+          >
+            <p
+              className="text-sm sm:text-base leading-relaxed"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              We help individuals understand their Health Readiness Score and
+              identify the small daily habits that may be silently affecting
+              their body.
+            </p>
+            <p
+              className="text-sm sm:text-base leading-relaxed font-medium"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Our focus is not quick fixes — It is clarity, correction, and
+              consistency.
+            </p>
+            <p
+              className="text-sm sm:text-base leading-relaxed"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              We believe lifestyle imbalance happens gradually. Correction must
+              also begin gradually — but with structure.
+            </p>
+          </div>
+
+          {/* Philosophy Section */}
+          <div
+            data-ocid="about.philosophy_section"
+            className="rounded-2xl p-5 mb-6"
+            style={{
+              background: "oklch(var(--abl-green) / 0.06)",
+              borderLeft: "4px solid oklch(var(--abl-green))",
+              border: "1.5px solid oklch(var(--abl-green) / 0.2)",
+              borderLeftWidth: "4px",
+            }}
+          >
+            <h2
+              className="font-display font-bold text-base sm:text-lg mb-3"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Our Philosophy (Clarity. Correction. Consistency.)
+            </h2>
+            <p
+              className="text-sm sm:text-base leading-relaxed"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              At ABL Pulse, we believe that the human body has an immense
+              capacity to heal itself. However, modern lifestyle, incorrect
+              dietary habits, and stress have suppressed this natural ability.
+            </p>
+          </div>
+
+          {/* Dr. Suman Lal Block */}
+          <div
+            data-ocid="about.doctor_section"
+            className="rounded-2xl p-5 mb-6 flex flex-col items-center gap-4"
+            style={{
+              background: "white",
+              border: "1.5px solid oklch(var(--abl-green) / 0.15)",
+              boxShadow: "0 2px 12px oklch(var(--abl-green) / 0.06)",
+            }}
+          >
+            {/* Square photo */}
+            <div className="flex flex-col items-center gap-2">
+              <img
+                src="/assets/uploads/Dr-Suman-Lal-2.png"
+                alt="Dr. Suman Lal – Founder, ABL Pulse"
+                className="w-40 h-40 sm:w-48 sm:h-48 rounded-2xl object-cover object-top"
+                style={{
+                  border: "3px solid oklch(var(--abl-green) / 0.2)",
+                  boxShadow: "0 4px 16px oklch(var(--abl-green) / 0.12)",
+                }}
+              />
+              <p
+                className="text-sm font-bold tracking-wide"
+                style={{ color: "oklch(var(--abl-gold))" }}
+              >
+                Founder, Dr. Suman Lal
+              </p>
+            </div>
+
+            {/* Paragraphs after photo */}
+            <div className="flex flex-col gap-3 w-full">
+              <p
+                className="text-sm sm:text-base leading-relaxed"
+                style={{ color: "oklch(var(--abl-green-mid))" }}
+              >
+                Our approach is not about suppressing symptoms with temporary
+                fixes. Instead, we focus on Root Cause Healing. By correcting
+                your food, water intake, and daily routine, we align your body
+                back with nature's rhythm.
+              </p>
+              <p
+                className="text-sm sm:text-base leading-relaxed"
+                style={{ color: "oklch(var(--abl-green-mid))" }}
+              >
+                Guided by Dr. Suman Lal's 40+ years of experience, we bring you
+                the essence of Indian Naturopathy and Ayurveda in a practical,
+                modern format.
+              </p>
+            </div>
+          </div>
+
+          {/* Core Values Section */}
+          <div data-ocid="about.core_values_section">
+            <h2
+              className="font-display font-bold text-xl sm:text-2xl mb-4 text-center"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Our Core Values
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {coreValues.map((value, idx) => (
+                <div
+                  key={value.title}
+                  data-ocid={`about.core_value.${idx + 1}`}
+                  className="rounded-2xl p-5 flex flex-col gap-2"
+                  style={{
+                    background: "oklch(var(--abl-gold) / 0.08)",
+                    border: "1.5px solid oklch(var(--abl-gold) / 0.3)",
+                  }}
+                >
+                  <h3
+                    className="font-display font-bold text-base"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    {value.title}
+                  </h3>
+                  <p
+                    className="text-sm leading-relaxed"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
+                  >
+                    {value.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   CONTACT US PAGE
+─────────────────────────────────────────── */
+function ContactUsPage({ onBack }: { onBack: () => void }) {
+  const WHATSAPP_LINK = "https://wa.me/919199434365";
+
+  return (
+    <div
+      data-ocid="contact.page"
+      className="fixed inset-0 z-[900] flex flex-col overflow-hidden"
+      style={{ background: "oklch(var(--abl-bg))" }}
+    >
+      {/* Decorative background */}
+      <div
+        className="absolute inset-0 pointer-events-none overflow-hidden"
+        aria-hidden="true"
+      >
+        <LeafDecor className="top-0 right-0" size={200} opacity={0.05} />
+        <LeafDecor
+          className="bottom-40 left-0 rotate-180"
+          size={160}
+          opacity={0.04}
+        />
+      </div>
+
+      {/* Sticky Top Bar */}
+      <div
+        className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 flex-shrink-0"
+        style={{
+          background: "white",
+          borderBottom: "1px solid oklch(var(--abl-border))",
+        }}
+      >
+        <button
+          type="button"
+          data-ocid="contact.back_button"
+          onClick={onBack}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
+          style={{
+            color: "oklch(var(--abl-green))",
+            background: "oklch(var(--abl-green) / 0.08)",
+            border: "1px solid oklch(var(--abl-green) / 0.2)",
+          }}
+        >
+          <ArrowLeft size={15} />
+          <span className="hidden sm:inline">Back</span>
+        </button>
+        <LogoImage
+          imgClassName="h-8 w-8"
+          textClassName="text-sm"
+          textStyle={{ color: "oklch(var(--abl-green))" }}
+        />
+        <div className="w-[68px]" aria-hidden="true" />
+      </div>
+
+      {/* Scrollable Content */}
+      <div className="relative z-10 flex-1 overflow-y-auto pb-[80px] md:pb-8">
+        <div className="max-w-2xl mx-auto px-4 pt-8 pb-6">
+          {/* Page Heading */}
+          <div className="text-center mb-8">
+            <h1
+              className="font-display font-bold text-2xl sm:text-3xl leading-tight mb-3"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Contact Us
+            </h1>
+            <p
+              className="text-sm sm:text-base leading-relaxed max-w-lg mx-auto"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              We'd love to hear from you.
+            </p>
+          </div>
+
+          {/* Get in Touch Card */}
+          <div
+            className="rounded-2xl p-6 mb-5"
+            style={{
+              background: "white",
+              border: "1.5px solid oklch(var(--abl-green) / 0.15)",
+              boxShadow: "0 2px 16px oklch(var(--abl-green) / 0.07)",
+            }}
+          >
+            <h2
+              className="font-display font-bold text-lg mb-5"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Get in Touch
+            </h2>
+
+            <div className="flex flex-col gap-5">
+              {/* Phone / WhatsApp */}
+              <div className="flex items-start gap-4">
+                <div
+                  className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ background: "oklch(var(--abl-green) / 0.08)" }}
+                >
+                  <Phone
+                    size={18}
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  />
+                </div>
+                <div>
+                  <p
+                    className="text-xs font-semibold uppercase tracking-wider mb-1"
+                    style={{ color: "oklch(var(--abl-border))" }}
+                  >
+                    Phone / WhatsApp
+                  </p>
+                  <a
+                    href="tel:+919199434365"
+                    data-ocid="contact.phone_link"
+                    className="text-base font-semibold hover:underline"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    +91 9199434365
+                  </a>
+                </div>
+              </div>
+
+              {/* Email */}
+              <div className="flex items-start gap-4">
+                <div
+                  className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ background: "oklch(var(--abl-gold) / 0.1)" }}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ color: "oklch(var(--abl-gold))" }}
+                    aria-hidden="true"
+                  >
+                    <rect width="20" height="16" x="2" y="4" rx="2" />
+                    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                  </svg>
+                </div>
+                <div>
+                  <p
+                    className="text-xs font-semibold uppercase tracking-wider mb-1"
+                    style={{ color: "oklch(var(--abl-border))" }}
+                  >
+                    Email Address
+                  </p>
+                  <a
+                    href="mailto:support@ablpulse.com"
+                    data-ocid="contact.email_link"
+                    className="text-base font-semibold hover:underline break-all"
+                    style={{ color: "oklch(var(--abl-gold))" }}
+                  >
+                    support@ablpulse.com
+                  </a>
+                </div>
+              </div>
+
+              {/* Location */}
+              <div className="flex items-start gap-4">
+                <div
+                  className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ background: "oklch(var(--abl-green) / 0.08)" }}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                    aria-hidden="true"
+                  >
+                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                    <circle cx="12" cy="10" r="3" />
+                  </svg>
+                </div>
+                <div>
+                  <p
+                    className="text-xs font-semibold uppercase tracking-wider mb-1"
+                    style={{ color: "oklch(var(--abl-border))" }}
+                  >
+                    Location
+                  </p>
+                  <p
+                    className="text-base font-semibold leading-snug"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    Old Museum, Patna,
+                    <br />
+                    Bihar – 800001, India
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Office Hours Card */}
+          <div
+            className="rounded-2xl p-6 mb-5"
+            style={{
+              background: "white",
+              border: "1.5px solid oklch(var(--abl-border) / 0.3)",
+            }}
+          >
+            <h2
+              className="font-display font-bold text-lg mb-4"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Office Hours
+            </h2>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span
+                  className="text-sm font-medium"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Monday - Saturday
+                </span>
+                <span
+                  className="text-sm font-bold"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  10:00 AM - 7:00 PM
+                </span>
+              </div>
+              <div
+                className="border-t pt-2 flex items-center justify-between"
+                style={{ borderColor: "oklch(var(--abl-border) / 0.2)" }}
+              >
+                <span
+                  className="text-sm font-medium"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Sunday
+                </span>
+                <span
+                  className="text-sm font-bold"
+                  style={{ color: "#DC2626" }}
+                >
+                  Closed
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* WhatsApp CTA */}
+          <div
+            className="rounded-3xl p-6 text-center flex flex-col items-center gap-4"
+            style={{
+              background: "oklch(var(--abl-green))",
+              boxShadow: "0 8px 32px oklch(var(--abl-green) / 0.25)",
+            }}
+          >
+            <p className="text-base font-bold text-white">
+              Need immediate assistance?
+            </p>
+            <a
+              href={WHATSAPP_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-ocid="contact.whatsapp_button"
+              className="inline-flex items-center gap-2 px-7 py-3.5 rounded-2xl text-sm font-bold tracking-wide transition-all"
+              style={{
+                background: "#25D366",
+                color: "white",
+                boxShadow: "0 4px 16px rgba(37,211,102,0.4)",
+                textDecoration: "none",
+              }}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />
+              </svg>
+              Chat on WhatsApp →
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   BOTTOM APP BAR (Mobile)
+─────────────────────────────────────────── */
 const navItems = [
   {
     icon: Home,
@@ -5631,6 +6246,7 @@ const navItems = [
     id: "home",
     ocid: "nav.mobile.home_link",
     isAssessment: false,
+    isContact: false,
   },
   {
     icon: ClipboardList,
@@ -5638,6 +6254,7 @@ const navItems = [
     id: "assessment",
     ocid: "nav.mobile.assessment_link",
     isAssessment: true,
+    isContact: false,
   },
   {
     icon: Briefcase,
@@ -5645,6 +6262,7 @@ const navItems = [
     id: "framework",
     ocid: "nav.mobile.services_link",
     isAssessment: false,
+    isContact: false,
   },
   {
     icon: Users,
@@ -5652,13 +6270,15 @@ const navItems = [
     id: "trust",
     ocid: "nav.mobile.about_link",
     isAssessment: false,
+    isContact: false,
   },
   {
     icon: Phone,
     label: "Contact",
-    id: "footer",
+    id: "contact",
     ocid: "nav.mobile.contact_link",
     isAssessment: false,
+    isContact: true,
   },
 ];
 
@@ -5667,13 +6287,17 @@ function BottomAppBar({
   onAssessment,
   onGoHome,
   onGoServices,
+  onGoAbout,
+  onGoContact,
   currentPage,
 }: {
   activeSection: string;
   onAssessment: () => void;
   onGoHome: () => void;
   onGoServices: () => void;
-  currentPage: "home" | "assessment" | "services";
+  onGoAbout: () => void;
+  onGoContact: () => void;
+  currentPage: "home" | "assessment" | "services" | "about" | "contact";
 }) {
   return (
     <nav className="bottom-nav md:hidden" aria-label="Mobile navigation">
@@ -5686,6 +6310,10 @@ function BottomAppBar({
             isActive = item.isAssessment;
           } else if (currentPage === "services") {
             isActive = item.id === "framework";
+          } else if (currentPage === "about") {
+            isActive = item.id === "trust";
+          } else if (currentPage === "contact") {
+            isActive = item.isContact;
           } else {
             isActive = item.id === (activeSection || "home");
           }
@@ -5703,6 +6331,10 @@ function BottomAppBar({
                   onAssessment();
                 } else if (item.id === "framework") {
                   onGoServices();
+                } else if (item.id === "trust") {
+                  onGoAbout();
+                } else if (item.isContact) {
+                  onGoContact();
                 } else {
                   scrollToSection(item.id);
                 }
@@ -5752,7 +6384,7 @@ function WhatsAppFloat() {
   return (
     <a
       data-ocid="whatsapp.button"
-      href="https://wa.me/"
+      href="https://wa.me/919199434365"
       target="_blank"
       rel="noopener noreferrer"
       className="whatsapp-float"
@@ -5827,7 +6459,7 @@ function useActiveSection(ids: string[]) {
 export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState<
-    "home" | "assessment" | "services"
+    "home" | "assessment" | "services" | "about" | "contact"
   >("home");
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
@@ -5855,6 +6487,16 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
+  const goToAbout = () => {
+    setCurrentPage("about");
+    setMobileMenuOpen(false);
+  };
+
+  const goToContact = () => {
+    setCurrentPage("contact");
+    setMobileMenuOpen(false);
+  };
+
   const goHome = () => {
     setCurrentPage("home");
   };
@@ -5876,6 +6518,12 @@ export default function App() {
       {currentPage === "services" && (
         <ServicesPage onAssessment={goToAssessment} onBack={goHome} />
       )}
+
+      {/* About Us page (full-screen overlay) */}
+      {currentPage === "about" && <AboutUsPage onBack={goHome} />}
+
+      {/* Contact Us page (full-screen overlay) */}
+      {currentPage === "contact" && <ContactUsPage onBack={goHome} />}
 
       {/* Admin Dashboard (full-screen overlay) */}
       {showAdminDashboard && (
@@ -5900,6 +6548,8 @@ export default function App() {
         onAssessment={goToAssessment}
         onLogin={openLogin}
         onServices={goToServices}
+        onAbout={goToAbout}
+        onContact={goToContact}
       />
 
       {/* Main content — top padding for sticky header */}
@@ -5912,7 +6562,13 @@ export default function App() {
         <PreFooterCTA onAssessment={goToAssessment} />
       </main>
 
-      <Footer onAssessment={goToAssessment} onLogin={openLogin} />
+      <Footer
+        onAssessment={goToAssessment}
+        onLogin={openLogin}
+        onServices={goToServices}
+        onAbout={goToAbout}
+        onContact={goToContact}
+      />
 
       {/* Mobile bottom nav */}
       <BottomAppBar
@@ -5920,6 +6576,8 @@ export default function App() {
         onAssessment={goToAssessment}
         onGoHome={goHome}
         onGoServices={goToServices}
+        onGoAbout={goToAbout}
+        onGoContact={goToContact}
         currentPage={currentPage}
       />
 
