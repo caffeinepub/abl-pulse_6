@@ -39,6 +39,23 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'getSubmissions' : IDL.Func([], [IDL.Vec(HealthSeekerRecord)], ['query']),
+  'saveBasicInfo' : IDL.Func(
+      [
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        IDL.Opt(IDL.Text),
+      ],
+      [IDL.Nat],
+      [],
+    ),
   'submitAssessment' : IDL.Func(
       [
         IDL.Text,
@@ -55,6 +72,11 @@ export const idlService = IDL.Service({
         IDL.Vec(IDL.Nat),
       ],
       [IDL.Nat],
+      [],
+    ),
+  'updateAssessmentResult' : IDL.Func(
+      [IDL.Nat, IDL.Vec(IDL.Nat)],
+      [IDL.Bool],
       [],
     ),
 });
@@ -93,6 +115,23 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'getSubmissions' : IDL.Func([], [IDL.Vec(HealthSeekerRecord)], ['query']),
+    'saveBasicInfo' : IDL.Func(
+        [
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          IDL.Opt(IDL.Text),
+        ],
+        [IDL.Nat],
+        [],
+      ),
     'submitAssessment' : IDL.Func(
         [
           IDL.Text,
@@ -109,6 +148,11 @@ export const idlFactory = ({ IDL }) => {
           IDL.Vec(IDL.Nat),
         ],
         [IDL.Nat],
+        [],
+      ),
+    'updateAssessmentResult' : IDL.Func(
+        [IDL.Nat, IDL.Vec(IDL.Nat)],
+        [IDL.Bool],
         [],
       ),
   });

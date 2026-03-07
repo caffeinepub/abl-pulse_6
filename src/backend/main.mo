@@ -2,8 +2,9 @@ import Map "mo:core/Map";
 import Time "mo:core/Time";
 import Nat "mo:core/Nat";
 import Array "mo:core/Array";
-import Iter "mo:core/Iter";
 import Runtime "mo:core/Runtime";
+
+
 
 actor {
   type HealthSeekerRecord = {
@@ -29,12 +30,8 @@ actor {
     submittedAt : Int;
   };
 
-  var nextId : Nat = 1;
-  var submissionsEntries : [(Nat, HealthSeekerRecord)] = [];
-
-  let submissions : Map.Map<Nat, HealthSeekerRecord> = Map.fromIter<Nat, HealthSeekerRecord>(
-    submissionsEntries.vals(),
-  );
+  var nextId = 1;
+  let submissions = Map.empty<Nat, HealthSeekerRecord>();
 
   func validateAnswers(answers : [Nat]) {
     if (answers.size() != 40) {
@@ -78,9 +75,9 @@ actor {
   };
 
   func categorizeScore(score : Nat) : Text {
-    if (score <= 69) {
+    if (score <= 56) {
       "needs_attention";
-    } else if (score <= 89) {
+    } else if (score <= 116) {
       "building_zone";
     } else {
       "strong_area";
@@ -129,9 +126,74 @@ actor {
     };
 
     submissions.add(nextId, record);
-    let resultId = nextId;
+
     nextId += 1;
-    resultId;
+    record.id;
+  };
+
+  public shared ({ caller }) func saveBasicInfo(
+    name : Text,
+    gender : Text,
+    age : Text,
+    profession : Text,
+    weight : Text,
+    height : Text,
+    bp : Text,
+    sugar : Text,
+    thyroid : Text,
+    whatsapp : Text,
+    email : ?Text,
+  ) : async Nat {
+    let record : HealthSeekerRecord = {
+      id = nextId;
+      name;
+      gender;
+      age;
+      profession;
+      weight;
+      height;
+      bp;
+      sugar;
+      thyroid;
+      whatsapp;
+      email;
+      answers = Array.tabulate<Nat>(40, func(_) { 0 });
+      totalScore = 0;
+      sleepScore = 0;
+      gutScore = 0;
+      movementScore = 0;
+      mindScore = 0;
+      category = "incomplete";
+      submittedAt = Time.now();
+    };
+
+    submissions.add(nextId, record);
+    nextId += 1;
+    record.id;
+  };
+
+  public shared ({ caller }) func updateAssessmentResult(id : Nat, answers : [Nat]) : async Bool {
+    validateAnswers(answers);
+
+    let record = submissions.get(id);
+    switch (record) {
+      case (null) { false };
+      case (?existing) {
+        let (totalScore, sleepScore, gutScore, movementScore, mindScore) = calculateScores(answers);
+        let updatedRecord = {
+          existing with
+          answers;
+          totalScore;
+          sleepScore;
+          gutScore;
+          movementScore;
+          mindScore;
+          category = categorizeScore(totalScore);
+        };
+        submissions.add(id, updatedRecord);
+        true;
+      };
+    };
   };
 
   public query ({ caller }) func getSubmissions() : async [HealthSeekerRecord] {
@@ -149,13 +211,5 @@ actor {
     } else {
       false;
     };
-  };
-
-  system func preupgrade() {
-    submissionsEntries := submissions.entries().toArray();
-  };
-
-  system func postupgrade() {
-    submissionsEntries := [];
   };
 };

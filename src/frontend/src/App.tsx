@@ -1,8 +1,4 @@
-// jsPDF loaded via CDN script in index.html (window.jspdf)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const window: Window & {
-  jspdf: { jsPDF: new (...args: unknown[]) => unknown };
-};
+import { jsPDF } from "jspdf";
 import {
   Activity,
   ArrowLeft,
@@ -190,6 +186,7 @@ function getZoneLabel(category: string): string {
   if (category === "needs_attention") return "Needs Attention";
   if (category === "building_zone") return "Building Zone";
   if (category === "strong_area") return "Strong Area";
+  if (category === "incomplete") return "Incomplete";
   return category;
 }
 
@@ -210,10 +207,17 @@ function getZoneColors(category: string): {
       color: "#D97706",
       border: "rgba(217,119,6,0.25)",
     };
+  if (category === "strong_area")
+    return {
+      bg: "rgba(0,66,37,0.08)",
+      color: "#004225",
+      border: "rgba(0,66,37,0.2)",
+    };
+  // incomplete or unknown
   return {
-    bg: "rgba(0,66,37,0.08)",
-    color: "#004225",
-    border: "rgba(0,66,37,0.2)",
+    bg: "rgba(107,114,128,0.1)",
+    color: "#6b7280",
+    border: "rgba(107,114,128,0.25)",
   };
 }
 
@@ -263,6 +267,8 @@ function AdminDetailModal({
   record: HealthSeekerRecord;
   onClose: () => void;
 }) {
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -270,6 +276,18 @@ function AdminDetailModal({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const handleDownloadPDF = async () => {
+    setIsGeneratingPDF(true);
+    try {
+      await generateAdminPDF(record);
+    } catch (err) {
+      console.error("PDF generation error:", err);
+      alert("PDF generation failed. Please try again.");
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
 
   const sections = [
     { label: "Sleep & Hydration", score: Number(record.sleepScore) },
@@ -451,6 +469,86 @@ function AdminDetailModal({
               })}
             </div>
           </div>
+
+          {/* Answer Summary */}
+          {Number(record.answers.length) === 40 && (
+            <div>
+              <p
+                className="text-xs font-bold uppercase tracking-wider mb-2.5"
+                style={{ color: "oklch(var(--abl-green-mid))" }}
+              >
+                Answer Summary
+              </p>
+              {[
+                { label: "Sleep & Hydration", start: 0 },
+                { label: "Gut & Metabolic", start: 10 },
+                { label: "Movement & Circulation", start: 20 },
+                { label: "Mind & Emotional Balance", start: 30 },
+              ].map(({ label, start }) => (
+                <div key={label} className="mb-3">
+                  <p
+                    className="text-xs font-semibold mb-1.5"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    {label}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Array.from({ length: 10 }, (_, i) => {
+                      const val = Number(record.answers[start + i]);
+                      const color =
+                        val <= 1
+                          ? "#DC2626"
+                          : val === 2
+                            ? "#D97706"
+                            : "#004225";
+                      return (
+                        <span
+                          key={`${label}-q${i + 1}`}
+                          className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold"
+                          style={{
+                            background: `${color}18`,
+                            color,
+                            border: `1px solid ${color}44`,
+                          }}
+                          title={`Q${i + 1}: ${val}`}
+                        >
+                          {val}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Download PDF Button */}
+          <button
+            type="button"
+            data-ocid="admin.detail.pdf_button"
+            onClick={handleDownloadPDF}
+            disabled={isGeneratingPDF}
+            className="w-full py-3 rounded-xl flex items-center justify-center gap-2 font-bold text-sm transition-all active:scale-[0.98]"
+            style={{
+              background: isGeneratingPDF
+                ? "rgba(0,66,37,0.6)"
+                : "oklch(var(--abl-green))",
+              color: "white",
+              opacity: isGeneratingPDF ? 0.8 : 1,
+            }}
+          >
+            {isGeneratingPDF ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Generating PDF…
+              </>
+            ) : (
+              <>
+                <Download size={16} />
+                Download PDF Report
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>
@@ -552,13 +650,477 @@ function DeleteConfirmDialog({
 }
 
 /* ─────────────────────────────────────────────
-   ADMIN DASHBOARD
-───────────────────────────────────────────── */
-function AdminDashboard({ onLogout }: { onLogout: () => void }) {
-  const { actor } = useActor();
-  const [activeTab, setActiveTab] = useState<"overview" | "records">(
-    "overview",
+   generateAdminPDF — generate branded PDF from a HealthSeekerRecord
+─────────────────────────────────────────────── */
+async function generateAdminPDF(record: HealthSeekerRecord): Promise<void> {
+  // Map record answers (bigint[]) → Record<string, number>
+  const answers: Record<string, number> = {};
+  const secOffsets = [0, 10, 20, 30];
+  for (let si = 0; si < 4; si++) {
+    for (let qi = 0; qi < 10; qi++) {
+      const idx = secOffsets[si] + qi;
+      answers[`s${si}-q${qi}`] = Number(record.answers[idx] ?? 0);
+    }
+  }
+
+  // Helper: load image URL → base64 data URL
+  const loadImageAsDataURL = async (url: string): Promise<string> => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) return "";
+      const blob = await response.blob();
+      return await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve("");
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  const [logoDataURL, drSumanDataURL] = await Promise.all([
+    loadImageAsDataURL("/assets/uploads/ABL-Pulse-Logo-1.png"),
+    loadImageAsDataURL("/assets/uploads/Dr-Suman-Lal-2.png"),
+  ]);
+
+  const today = new Date();
+  const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+
+  const s1Items = getSection1NeedsAttention(answers);
+  const s2Items = getSection2NeedsAttention(answers);
+  const s3Items = getSection3NeedsAttention(answers);
+  const s4Items = getSection4NeedsAttention(answers);
+
+  const sectionNames = [
+    "Sleep & Hydration",
+    "Gut Cleanse & Metabolic",
+    "Movement & Circulation",
+    "Mind & Emotional Balance",
+  ];
+
+  const sectionScoreArr = [
+    Number(record.sleepScore),
+    Number(record.gutScore),
+    Number(record.movementScore),
+    Number(record.mindScore),
+  ];
+
+  const sectionNeedsAttention = [s1Items, s2Items, s3Items, s4Items];
+  const allSuggestionsData = [
+    SECTION1_SUGGESTIONS,
+    SECTION2_SUGGESTIONS,
+    SECTION3_SUGGESTIONS,
+    SECTION4_SUGGESTIONS,
+  ] as const;
+
+  const getSectionZoneLabelColor = (score: number) => {
+    if (score <= 13) return { label: "Needs Attention", color: "#DC2626" };
+    if (score <= 26) return { label: "Building Zone", color: "#D97706" };
+    return { label: "Strong Area", color: "#004225" };
+  };
+
+  const getSectionAllZoneSuggestions = (secIdx: number) => {
+    const suggestions = allSuggestionsData[
+      secIdx
+    ] as typeof SECTION1_SUGGESTIONS;
+    const buildingZoneItems: { label: string; text: string }[] = [];
+    const strongAreaItems: { label: string; text: string }[] = [];
+    for (let qi = 0; qi < 10; qi++) {
+      const score = answers[`s${secIdx}-q${qi}`] ?? 0;
+      const sugg = suggestions[qi];
+      if (score === 2) {
+        buildingZoneItems.push({
+          label: sugg.label,
+          text: sugg.building_zone.en,
+        });
+      } else if (score >= 3) {
+        strongAreaItems.push({ label: sugg.label, text: sugg.strong_area.en });
+      }
+    }
+    return { buildingZoneItems, strongAreaItems };
+  };
+
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+  const pageW = 210;
+  const pageH = 297;
+  const ml = 18;
+  const mr = 18;
+  const mt = 15;
+  const mb = 18;
+  const contentW = pageW - ml - mr;
+  let y = mt;
+
+  const green = "#004225";
+  const gold = "#9E6B3D";
+  const gray = "#6b7280";
+  const red = "#DC2626";
+  const amber = "#D97706";
+
+  const addHeader = () => {
+    y = mt;
+    if (logoDataURL) {
+      try {
+        doc.addImage(logoDataURL, "PNG", ml, y, 14, 14);
+      } catch {
+        /* skip */
+      }
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(green);
+    doc.text("ABL PULSE", ml + 17, y + 5);
+    doc.setFontSize(9);
+    doc.setTextColor(gold);
+    doc.setFont("helvetica", "bold");
+    doc.text("Ayurved Banaye Life", ml + 17, y + 10);
+    doc.setFontSize(7.5);
+    doc.setTextColor(gray);
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      "Old Museum South Wall, Dak-bangla Churaha, Near Kotwali Thana, Patna 1",
+      ml + 17,
+      y + 14,
+    );
+    doc.setFontSize(8);
+    doc.setTextColor(green);
+    doc.setFont("helvetica", "bold");
+    doc.text("WhatsApp / Call: +91 9199434365", ml + 17, y + 18);
+    y += 22;
+    doc.setDrawColor(green);
+    doc.setLineWidth(0.7);
+    doc.line(ml, y, ml + contentW, y);
+    y += 6;
+  };
+
+  const sectionLabel = (label: string) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(green);
+    doc.text(label.toUpperCase(), ml, y);
+    y += 1.5;
+    doc.setDrawColor("#e5e7eb");
+    doc.setLineWidth(0.3);
+    doc.line(ml, y, ml + contentW, y);
+    y += 5;
+  };
+
+  const newPage = () => {
+    doc.addPage();
+    addHeader();
+  };
+
+  const checkPage = (needed: number) => {
+    if (y + needed > pageH - mb) {
+      newPage();
+    }
+  };
+
+  // PAGE 1
+  addHeader();
+
+  sectionLabel("Health Seeker Details");
+  const fields = [
+    ["Name", record.name || "—"],
+    ["Age", record.age || "—"],
+    ["Gender", record.gender || "—"],
+    ["Date", dateStr],
+  ];
+  const fieldW = contentW / 4;
+  fields.forEach(([label, value], i) => {
+    const fx = ml + i * fieldW;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(gold);
+    doc.text(String(label).toUpperCase(), fx, y);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(green);
+    doc.text(String(value), fx, y + 4.5);
+  });
+  y += 12;
+
+  checkPage(28);
+  sectionLabel("Overall Health Readiness Score");
+  doc.setFillColor(240, 253, 244);
+  doc.setDrawColor(green);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(ml, y, contentW, 22, 3, 3, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(32);
+  doc.setTextColor(green);
+  const totalScoreStr = String(Number(record.totalScore));
+  doc.text(totalScoreStr, ml + 8, y + 15);
+  doc.setFontSize(12);
+  doc.setTextColor(gray);
+  doc.setFont("helvetica", "normal");
+  doc.text("/160", ml + 8 + doc.getTextWidth(totalScoreStr) + 1, y + 15);
+  const zc2 =
+    record.category === "needs_attention"
+      ? red
+      : record.category === "building_zone"
+        ? amber
+        : green;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(zc2);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(ml + contentW - 48, y + 6, 44, 10, 2, 2, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(zc2);
+  const zoneText2 =
+    record.category === "needs_attention"
+      ? "Needs Attention"
+      : record.category === "building_zone"
+        ? "Building Zone"
+        : "Strong Area";
+  doc.text(zoneText2, ml + contentW - 26, y + 12.5, { align: "center" });
+  y += 28;
+
+  checkPage(35);
+  sectionLabel("Section-wise Summary");
+  const colW = [contentW * 0.5, contentW * 0.25, contentW * 0.25];
+  doc.setFillColor(249, 250, 251);
+  doc.rect(ml, y, contentW, 7, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(gray);
+  doc.text("Section", ml + 2, y + 4.8);
+  doc.text("Score", ml + colW[0] + colW[1] / 2, y + 4.8, { align: "center" });
+  doc.text("Zone", ml + colW[0] + colW[1] + colW[2] / 2, y + 4.8, {
+    align: "center",
+  });
+  y += 7;
+  for (const i of [0, 1, 2, 3]) {
+    const sc = sectionScoreArr[i];
+    const { label: zl, color: zcol } = getSectionZoneLabelColor(sc);
+    doc.setDrawColor("#e5e7eb");
+    doc.setLineWidth(0.2);
+    doc.rect(ml, y, contentW, 7);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor("#1f2937");
+    doc.text(sectionNames[i], ml + 2, y + 4.8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(green);
+    doc.text(`${sc}/40`, ml + colW[0] + colW[1] / 2, y + 4.8, {
+      align: "center",
+    });
+    doc.setTextColor(zcol);
+    doc.text(zl, ml + colW[0] + colW[1] + colW[2] / 2, y + 4.8, {
+      align: "center",
+    });
+    y += 7;
+  }
+  y += 6;
+
+  checkPage(20);
+  sectionLabel("What You Are Doing Well");
+  let hasDoingWell = false;
+  for (let secIdx = 0; secIdx < 4; secIdx++) {
+    const { buildingZoneItems, strongAreaItems } =
+      getSectionAllZoneSuggestions(secIdx);
+    if (buildingZoneItems.length === 0 && strongAreaItems.length === 0)
+      continue;
+    hasDoingWell = true;
+    checkPage(18);
+    const startY = y;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(green);
+    doc.text(sectionNames[secIdx], ml + 3, y + 5);
+    y += 8;
+    if (buildingZoneItems.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(amber);
+      doc.text("Building Zone", ml + 3, y + 3.5);
+      y += 6;
+      for (const item of buildingZoneItems) {
+        checkPage(8);
+        const lines = doc.splitTextToSize(`• ${item.text}`, contentW - 6);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor("#374151");
+        doc.text(lines, ml + 3, y);
+        y += lines.length * 4 + 1;
+      }
+    }
+    if (strongAreaItems.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(green);
+      doc.text("Strong Area", ml + 3, y + 3.5);
+      y += 6;
+      for (const item of strongAreaItems) {
+        checkPage(8);
+        const lines = doc.splitTextToSize(`• ${item.text}`, contentW - 6);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor("#374151");
+        doc.text(lines, ml + 3, y);
+        y += lines.length * 4 + 1;
+      }
+    }
+    doc.setFillColor(250, 255, 254);
+    doc.setDrawColor("#e5e7eb");
+    doc.setLineWidth(0.3);
+    doc.roundedRect(ml, startY, contentW, y - startY + 2, 2, 2);
+    y += 5;
+  }
+  if (!hasDoingWell) {
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8.5);
+    doc.setTextColor(gray);
+    doc.text(
+      "Keep building consistent habits to see your strong areas grow!",
+      ml,
+      y,
+    );
+    y += 8;
+  }
+
+  // PAGE 2
+  newPage();
+  sectionLabel("Areas to Focus On");
+  for (let i = 0; i < 4; i++) {
+    const secScore = sectionScoreArr[i];
+    const { label: secZoneLabel, color: secZoneColor } =
+      getSectionZoneLabelColor(secScore);
+    const naItems = sectionNeedsAttention[i];
+    const blockH = Math.max(20, 16 + naItems.length * 12) + 10;
+    checkPage(blockH);
+    const cardStartY = y;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(green);
+    doc.text(sectionNames[i], ml + 3, y + 5);
+    doc.setFontSize(8);
+    doc.setTextColor(gray);
+    doc.text(`Score: ${secScore}/40`, ml + 3, y + 9.5);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(secZoneColor);
+    doc.text(secZoneLabel, ml + contentW - 3, y + 5, { align: "right" });
+    y += 13;
+    if (naItems.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(red);
+      doc.text("Needs Attention:", ml + 3, y);
+      y += 5;
+      for (const item of naItems) {
+        checkPage(8);
+        const text = item.suggestion.en;
+        const lines = doc.splitTextToSize(`• ${text}`, contentW - 6);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor("#374151");
+        doc.text(lines, ml + 3, y);
+        y += lines.length * 4 + 1;
+      }
+    } else {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.setTextColor(gray);
+      doc.text("All habits on track – no attention needed.", ml + 3, y);
+      y += 6;
+    }
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor("#e5e7eb");
+    doc.setLineWidth(0.3);
+    doc.roundedRect(ml, cardStartY, contentW, y - cardStartY + 2, 2, 2);
+    y += 5;
+  }
+
+  // Expert CTA
+  checkPage(28);
+  doc.setFillColor(0, 66, 37);
+  doc.roundedRect(ml, y, contentW, 26, 3, 3, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor("#ffffff");
+  doc.text("1-on-1 Expert Consultation with Dr. Suman Lal", ml + 5, y + 7);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(220, 220, 220);
+  const ctaLines = doc.splitTextToSize(
+    "Apne Readiness Gap ko samajhne ke liye Dr. Suman Lal se 1-on-1 consultation book karein.",
+    contentW - 10,
   );
+  doc.text(ctaLines, ml + 5, y + 13);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor("#fcd34d");
+  doc.text("WhatsApp / Call: +91 9199434365", ml + 5, y + 23);
+  y += 32;
+
+  // Footer
+  const footerY = pageH - mb - 14;
+  doc.setDrawColor(green);
+  doc.setLineWidth(0.6);
+  doc.line(ml, footerY, ml + contentW, footerY);
+  if (drSumanDataURL) {
+    try {
+      doc.addImage(drSumanDataURL, "PNG", ml, footerY + 3, 12, 12);
+    } catch {
+      /* skip */
+    }
+  }
+  doc.setFont("helvetica", "bolditalic");
+  doc.setFontSize(10);
+  doc.setTextColor(green);
+  doc.text("Dr. Suman Lal", ml + 15, footerY + 7);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(gray);
+  doc.text(
+    "Naturopathy Practitioner | Doctorate in Psychology",
+    ml + 15,
+    footerY + 11,
+  );
+  doc.setFontSize(7);
+  doc.setTextColor("#9b9b9b");
+  doc.text("Authorized Signature", ml + 15, footerY + 14.5);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(green);
+  doc.text("ABL PULSE", ml + contentW, footerY + 7, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(gold);
+  doc.text("Ayurved Banaye Life", ml + contentW, footerY + 11, {
+    align: "right",
+  });
+  doc.setFontSize(7);
+  doc.setTextColor("#9b9b9b");
+  doc.text(`Generated: ${dateStr}`, ml + contentW, footerY + 14.5, {
+    align: "right",
+  });
+
+  const safeName = record.name.replace(/[^a-zA-Z0-9]/g, "-");
+  doc.save(`ABL-PULSE-Report-${safeName}.pdf`);
+}
+
+/* ─────────────────────────────────────────────
+   ADMIN DASHBOARD
+─────────────────────────────────────────────── */
+function AdminDashboard({
+  onLogout,
+  role,
+}: { onLogout: () => void; role: "admin" | "hc" }) {
+  const { actor } = useActor();
+  const [activeTab, setActiveTab] = useState<
+    "pipeline" | "contacts" | "analytics" | "settings"
+  >("pipeline");
   const [records, setRecords] = useState<HealthSeekerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -680,6 +1242,64 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     borderRadius: "16px",
   };
 
+  // Analytics helpers
+  const incompleteCount = records.filter(
+    (r) => r.category === "incomplete",
+  ).length;
+  const completedRecords = records.filter((r) => r.category !== "incomplete");
+  const avgScore =
+    completedRecords.length > 0
+      ? Math.round(
+          completedRecords.reduce((acc, r) => acc + Number(r.totalScore), 0) /
+            completedRecords.length,
+        )
+      : 0;
+
+  // Last 7 days submissions
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    const dayStr = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const count = records.filter((r) => {
+      const rd = new Date(Number(r.submittedAt) / 1_000_000);
+      return (
+        rd.getDate() === d.getDate() &&
+        rd.getMonth() === d.getMonth() &&
+        rd.getFullYear() === d.getFullYear()
+      );
+    }).length;
+    return { day: dayStr, count };
+  });
+  const maxDayCount = Math.max(...last7Days.map((d) => d.count), 1);
+
+  // Sidebar nav items
+  const sidebarItems = [
+    {
+      id: "pipeline" as const,
+      label: "Pipeline",
+      Icon: Activity,
+      ocid: "admin.sidebar.pipeline_link",
+    },
+    {
+      id: "contacts" as const,
+      label: "Contacts",
+      Icon: Users,
+      ocid: "admin.sidebar.contacts_link",
+    },
+    {
+      id: "analytics" as const,
+      label: "Analytics",
+      Icon: ClipboardList,
+      ocid: "admin.sidebar.analytics_link",
+    },
+    {
+      id: "settings" as const,
+      label: "Settings",
+      Icon: Briefcase,
+      ocid: "admin.sidebar.settings_link",
+    },
+  ];
+
   return (
     <div
       data-ocid="admin.dashboard_page"
@@ -707,7 +1327,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               color: "rgba(255,255,255,0.9)",
             }}
           >
-            Admin Dashboard
+            {role === "hc" ? "Health Coach" : "Admin"} Dashboard
           </span>
         </div>
         <button
@@ -726,232 +1346,428 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         </button>
       </div>
 
-      {/* Tab Bar */}
-      <div
-        className="flex flex-shrink-0"
-        style={{
-          borderBottom: "1.5px solid oklch(var(--abl-green) / 0.1)",
-          background: "white",
-        }}
-      >
-        {(["overview", "records"] as const).map((tab) => {
-          const isActive = activeTab === tab;
-          return (
-            <button
-              key={tab}
-              type="button"
-              data-ocid={
-                tab === "overview" ? "admin.overview_tab" : "admin.records_tab"
-              }
-              onClick={() => setActiveTab(tab)}
-              className="flex-1 py-3 text-sm font-semibold capitalize transition-all relative"
-              style={{
-                color: isActive
-                  ? "oklch(var(--abl-green))"
-                  : "oklch(var(--abl-green-mid))",
-              }}
-            >
-              {tab === "overview" ? "Overview" : "Records"}
-              {isActive && (
-                <span
-                  className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
-                  style={{ background: "oklch(var(--abl-green))" }}
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Loading */}
-        {loading && (
-          <div
-            data-ocid="admin.loading_state"
-            className="flex flex-col items-center justify-center gap-3 py-16"
-          >
-            <Loader2
-              size={32}
-              className="animate-spin"
-              style={{ color: "oklch(var(--abl-green))" }}
-            />
-            <p
-              className="text-sm"
-              style={{ color: "oklch(var(--abl-green-mid))" }}
-            >
-              Loading records…
-            </p>
+      {/* Main layout: sidebar + content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar */}
+        <div
+          className="flex-shrink-0 flex flex-col pt-3 pb-4 gap-1 w-14 md:w-48"
+          style={{
+            background: "white",
+            borderRight: "1.5px solid oklch(var(--abl-green) / 0.1)",
+          }}
+        >
+          {/* Desktop sidebar: icon + label; mobile: icon only */}
+          <div className="md:hidden flex flex-col gap-1 px-1.5">
+            {sidebarItems.map(({ id, Icon, ocid }) => {
+              const isActive = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  data-ocid={ocid}
+                  onClick={() => setActiveTab(id)}
+                  className="flex items-center justify-center w-full h-11 rounded-xl transition-all"
+                  style={{
+                    background: isActive
+                      ? "oklch(var(--abl-green))"
+                      : "transparent",
+                    color: isActive ? "white" : "oklch(var(--abl-green-mid))",
+                  }}
+                  title={id.charAt(0).toUpperCase() + id.slice(1)}
+                >
+                  <Icon size={18} />
+                </button>
+              );
+            })}
           </div>
-        )}
-
-        {/* Error */}
-        {!loading && error && (
-          <div
-            data-ocid="admin.error_state"
-            className="m-4 p-4 rounded-2xl flex items-center gap-3"
-            style={{
-              background: "rgba(220,38,38,0.08)",
-              border: "1px solid rgba(220,38,38,0.2)",
-            }}
-          >
-            <X size={18} color="#DC2626" />
-            <p
-              className="text-sm font-medium flex-1"
-              style={{ color: "#DC2626" }}
-            >
-              {error}
-            </p>
-            <button
-              type="button"
-              data-ocid="admin.retry_button"
-              onClick={() => {
-                retryCountRef.current = 0;
-                if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-                fetchRecords();
-              }}
-              className="ml-auto text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all"
-              style={{
-                background: "#DC2626",
-                color: "white",
-              }}
-            >
-              Retry
-            </button>
+          <div className="hidden md:flex flex-col gap-1 px-2">
+            {sidebarItems.map(({ id, label, Icon, ocid }) => {
+              const isActive = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  data-ocid={ocid}
+                  onClick={() => setActiveTab(id)}
+                  className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap"
+                  style={{
+                    background: isActive
+                      ? "oklch(var(--abl-green))"
+                      : "transparent",
+                    color: isActive ? "white" : "oklch(var(--abl-green-mid))",
+                  }}
+                >
+                  <Icon size={16} />
+                  {label}
+                </button>
+              );
+            })}
           </div>
-        )}
+        </div>
 
-        {/* ─── OVERVIEW TAB ─── */}
-        {!loading && !error && activeTab === "overview" && (
-          <div className="p-4 flex flex-col gap-4">
-            {/* Total */}
+        {/* Content area */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Loading */}
+          {loading && (
             <div
-              className="rounded-2xl px-4 py-3 flex items-center justify-between"
-              style={cardStyle}
+              data-ocid="admin.loading_state"
+              className="flex flex-col items-center justify-center gap-3 py-16"
             >
-              <p
-                className="text-sm font-medium"
-                style={{ color: "oklch(var(--abl-green-mid))" }}
-              >
-                Total Submissions
-              </p>
-              <p
-                className="text-2xl font-bold"
+              <Loader2
+                size={32}
+                className="animate-spin"
                 style={{ color: "oklch(var(--abl-green))" }}
-              >
-                {records.length}
-              </p>
-            </div>
-
-            {/* Zone stat cards */}
-            <div className="grid grid-cols-3 gap-2.5">
-              {/* Needs Attention */}
-              <div
-                className="rounded-2xl p-3 flex flex-col items-center gap-1"
-                style={{
-                  background: "rgba(220,38,38,0.08)",
-                  border: "1.5px solid rgba(220,38,38,0.18)",
-                }}
-              >
-                <span className="text-xl">🔴</span>
-                <p className="text-lg font-bold" style={{ color: "#DC2626" }}>
-                  {needsAttentionCount}
-                </p>
-                <p
-                  className="text-xs font-semibold text-center leading-tight"
-                  style={{ color: "#DC2626" }}
-                >
-                  Needs
-                  <br />
-                  Attention
-                </p>
-              </div>
-
-              {/* Building Zone */}
-              <div
-                className="rounded-2xl p-3 flex flex-col items-center gap-1"
-                style={{
-                  background: "rgba(217,119,6,0.08)",
-                  border: "1.5px solid rgba(217,119,6,0.18)",
-                }}
-              >
-                <span className="text-xl">🟡</span>
-                <p className="text-lg font-bold" style={{ color: "#D97706" }}>
-                  {buildingZoneCount}
-                </p>
-                <p
-                  className="text-xs font-semibold text-center leading-tight"
-                  style={{ color: "#D97706" }}
-                >
-                  Building
-                  <br />
-                  Zone
-                </p>
-              </div>
-
-              {/* Strong Area */}
-              <div
-                className="rounded-2xl p-3 flex flex-col items-center gap-1"
-                style={{
-                  background: "rgba(0,66,37,0.07)",
-                  border: "1.5px solid rgba(0,66,37,0.16)",
-                }}
-              >
-                <span className="text-xl">🟢</span>
-                <p className="text-lg font-bold" style={{ color: "#004225" }}>
-                  {strongAreaCount}
-                </p>
-                <p
-                  className="text-xs font-semibold text-center leading-tight"
-                  style={{ color: "#004225" }}
-                >
-                  Strong
-                  <br />
-                  Area
-                </p>
-              </div>
-            </div>
-
-            {/* Recent Submissions */}
-            <div>
+              />
               <p
-                className="text-xs font-bold uppercase tracking-wider mb-2.5 px-1"
+                className="text-sm"
                 style={{ color: "oklch(var(--abl-green-mid))" }}
               >
-                Recent Submissions (Last 5)
+                Loading records…
               </p>
-              {recentRecords.length === 0 ? (
-                <div className="rounded-2xl p-6 text-center" style={cardStyle}>
+            </div>
+          )}
+
+          {/* Error */}
+          {!loading && error && (
+            <div
+              data-ocid="admin.error_state"
+              className="m-4 p-4 rounded-2xl flex items-center gap-3"
+              style={{
+                background: "rgba(220,38,38,0.08)",
+                border: "1px solid rgba(220,38,38,0.2)",
+              }}
+            >
+              <X size={18} color="#DC2626" />
+              <p
+                className="text-sm font-medium flex-1"
+                style={{ color: "#DC2626" }}
+              >
+                {error}
+              </p>
+              <button
+                type="button"
+                data-ocid="admin.retry_button"
+                onClick={() => {
+                  retryCountRef.current = 0;
+                  if (retryTimerRef.current)
+                    clearTimeout(retryTimerRef.current);
+                  fetchRecords();
+                }}
+                className="ml-auto text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all"
+                style={{
+                  background: "#DC2626",
+                  color: "white",
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* ─── PIPELINE TAB (was Overview) ─── */}
+          {!loading && !error && activeTab === "pipeline" && (
+            <div className="p-4 flex flex-col gap-4">
+              {/* Total */}
+              <div
+                className="rounded-2xl px-4 py-3 flex items-center justify-between"
+                style={cardStyle}
+              >
+                <p
+                  className="text-sm font-medium"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Total Submissions
+                </p>
+                <p
+                  className="text-2xl font-bold"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  {records.length}
+                </p>
+              </div>
+
+              {/* Zone stat cards */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <div
+                  className="rounded-2xl p-3 flex flex-col items-center gap-1"
+                  style={{
+                    background: "rgba(220,38,38,0.08)",
+                    border: "1.5px solid rgba(220,38,38,0.18)",
+                  }}
+                >
+                  <span className="text-xl">🔴</span>
+                  <p className="text-lg font-bold" style={{ color: "#DC2626" }}>
+                    {needsAttentionCount}
+                  </p>
+                  <p
+                    className="text-xs font-semibold text-center leading-tight"
+                    style={{ color: "#DC2626" }}
+                  >
+                    Needs
+                    <br />
+                    Attention
+                  </p>
+                </div>
+                <div
+                  className="rounded-2xl p-3 flex flex-col items-center gap-1"
+                  style={{
+                    background: "rgba(217,119,6,0.08)",
+                    border: "1.5px solid rgba(217,119,6,0.18)",
+                  }}
+                >
+                  <span className="text-xl">🟡</span>
+                  <p className="text-lg font-bold" style={{ color: "#D97706" }}>
+                    {buildingZoneCount}
+                  </p>
+                  <p
+                    className="text-xs font-semibold text-center leading-tight"
+                    style={{ color: "#D97706" }}
+                  >
+                    Building
+                    <br />
+                    Zone
+                  </p>
+                </div>
+                <div
+                  className="rounded-2xl p-3 flex flex-col items-center gap-1"
+                  style={{
+                    background: "rgba(0,66,37,0.07)",
+                    border: "1.5px solid rgba(0,66,37,0.16)",
+                  }}
+                >
+                  <span className="text-xl">🟢</span>
+                  <p className="text-lg font-bold" style={{ color: "#004225" }}>
+                    {strongAreaCount}
+                  </p>
+                  <p
+                    className="text-xs font-semibold text-center leading-tight"
+                    style={{ color: "#004225" }}
+                  >
+                    Strong
+                    <br />
+                    Area
+                  </p>
+                </div>
+              </div>
+
+              {/* Recent Submissions */}
+              <div>
+                <p
+                  className="text-xs font-bold uppercase tracking-wider mb-2.5 px-1"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Recent Submissions (Last 5)
+                </p>
+                {recentRecords.length === 0 ? (
+                  <div
+                    className="rounded-2xl p-6 text-center"
+                    style={cardStyle}
+                  >
+                    <p
+                      className="text-sm"
+                      style={{ color: "oklch(var(--abl-green-mid))" }}
+                    >
+                      No submissions yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {recentRecords.map((r, i) => {
+                      const zc = getZoneColors(r.category);
+                      return (
+                        <button
+                          type="button"
+                          key={String(r.id)}
+                          data-ocid={`admin.records.row.${i + 1}`}
+                          className="w-full rounded-2xl p-3.5 flex items-center gap-3 text-left transition-all active:scale-[0.99]"
+                          style={cardStyle}
+                          onClick={() => setSelectedRecord(r)}
+                        >
+                          <div
+                            className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold"
+                            style={{
+                              background: "oklch(var(--abl-green) / 0.1)",
+                              color: "oklch(var(--abl-green))",
+                            }}
+                          >
+                            {r.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p
+                              className="text-sm font-semibold truncate"
+                              style={{ color: "oklch(var(--abl-green))" }}
+                            >
+                              {r.name}
+                            </p>
+                            <p
+                              className="text-xs truncate"
+                              style={{ color: "oklch(var(--abl-green-mid))" }}
+                            >
+                              {r.whatsapp} · {formatDate(r.submittedAt)}
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <p
+                              className="text-sm font-bold"
+                              style={{ color: "oklch(var(--abl-green))" }}
+                            >
+                              {Number(r.totalScore)}
+                              <span className="text-xs font-normal opacity-60">
+                                /160
+                              </span>
+                            </p>
+                            <span
+                              className="text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                              style={{
+                                background: zc.bg,
+                                color: zc.color,
+                                border: `1px solid ${zc.border}`,
+                              }}
+                            >
+                              {getZoneLabel(r.category)}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ─── CONTACTS TAB (was Records) ─── */}
+          {!loading && !error && activeTab === "contacts" && (
+            <div className="p-4 flex flex-col gap-3">
+              {/* Search + CSV */}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 relative">
+                  <Search
+                    size={15}
+                    className="absolute left-3 top-1/2 -translate-y-1/2"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
+                  />
+                  <input
+                    type="text"
+                    data-ocid="admin.search_input"
+                    placeholder="Search by name…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2.5 text-sm rounded-xl outline-none"
+                    style={{
+                      background: "white",
+                      border: "1.5px solid oklch(var(--abl-green) / 0.2)",
+                      color: "oklch(var(--abl-green))",
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  data-ocid="admin.csv_download_button"
+                  onClick={() => downloadCSV(filteredRecords)}
+                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold flex-shrink-0 transition-all active:scale-[0.97]"
+                  style={{
+                    background: "oklch(var(--abl-green))",
+                    color: "white",
+                  }}
+                >
+                  <Download size={14} />
+                  CSV
+                </button>
+              </div>
+
+              {/* Zone Filter */}
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                {(
+                  [
+                    {
+                      id: "all",
+                      label: "All",
+                      ocid: "admin.zone_filter_all_button",
+                    },
+                    {
+                      id: "needs_attention",
+                      label: "🔴 Needs Attention",
+                      ocid: "admin.zone_filter_na_button",
+                    },
+                    {
+                      id: "building_zone",
+                      label: "🟡 Building Zone",
+                      ocid: "admin.zone_filter_bz_button",
+                    },
+                    {
+                      id: "strong_area",
+                      label: "🟢 Strong Area",
+                      ocid: "admin.zone_filter_sa_button",
+                    },
+                  ] as const
+                ).map(({ id, label, ocid }) => {
+                  const isActive = zoneFilter === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      data-ocid={ocid}
+                      onClick={() => setZoneFilter(id)}
+                      className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all"
+                      style={{
+                        background: isActive
+                          ? "oklch(var(--abl-green))"
+                          : "white",
+                        color: isActive ? "white" : "oklch(var(--abl-green))",
+                        border: `1.5px solid oklch(var(--abl-green) / ${isActive ? "1" : "0.25"})`,
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Records List */}
+              {filteredRecords.length === 0 ? (
+                <div
+                  className="rounded-2xl p-8 text-center"
+                  style={cardStyle}
+                  data-ocid="admin.records.empty_state"
+                >
                   <p
                     className="text-sm"
                     style={{ color: "oklch(var(--abl-green-mid))" }}
                   >
-                    No submissions yet.
+                    {search || zoneFilter !== "all"
+                      ? "No matching records found."
+                      : "No submissions yet."}
                   </p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-2">
-                  {recentRecords.map((r, i) => {
+                <div
+                  data-ocid="admin.records_table"
+                  className="flex flex-col gap-2"
+                >
+                  {filteredRecords.map((r, i) => {
                     const zc = getZoneColors(r.category);
                     return (
-                      <button
-                        type="button"
+                      <div
                         key={String(r.id)}
                         data-ocid={`admin.records.row.${i + 1}`}
-                        className="w-full rounded-2xl p-3.5 flex items-center gap-3 text-left transition-all active:scale-[0.99]"
+                        className="rounded-2xl p-3.5 flex items-center gap-3 transition-all"
                         style={cardStyle}
-                        onClick={() => setSelectedRecord(r)}
                       >
                         <div
-                          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold"
+                          className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold"
                           style={{
-                            background: "oklch(var(--abl-green) / 0.1)",
-                            color: "oklch(var(--abl-green))",
+                            background: "oklch(var(--abl-bg))",
+                            color: "oklch(var(--abl-green-mid))",
                           }}
                         >
-                          {r.name.charAt(0).toUpperCase()}
+                          {i + 1}
                         </div>
-                        <div className="flex-1 min-w-0">
+                        <button
+                          type="button"
+                          className="flex-1 min-w-0 cursor-pointer text-left"
+                          onClick={() => setSelectedRecord(r)}
+                        >
                           <p
                             className="text-sm font-semibold truncate"
                             style={{ color: "oklch(var(--abl-green))" }}
@@ -959,12 +1775,18 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                             {r.name}
                           </p>
                           <p
-                            className="text-xs truncate"
+                            className="text-xs truncate mt-0.5"
                             style={{ color: "oklch(var(--abl-green-mid))" }}
                           >
-                            {r.whatsapp} · {formatDate(r.submittedAt)}
+                            {r.age}y · {r.gender} · {r.whatsapp}
                           </p>
-                        </div>
+                          <p
+                            className="text-xs mt-0.5"
+                            style={{ color: "oklch(var(--abl-border))" }}
+                          >
+                            {formatDate(r.submittedAt)}
+                          </p>
+                        </button>
                         <div className="flex flex-col items-end gap-1 flex-shrink-0">
                           <p
                             className="text-sm font-bold"
@@ -986,214 +1808,346 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                             {getZoneLabel(r.category)}
                           </span>
                         </div>
-                      </button>
+                        <button
+                          type="button"
+                          data-ocid={`admin.delete_button.${i + 1}`}
+                          onClick={(e) => requestDelete(r.id, e)}
+                          className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all active:scale-90"
+                          style={{
+                            background: "rgba(220,38,38,0.08)",
+                            border: "1px solid rgba(220,38,38,0.18)",
+                          }}
+                          title="Delete record"
+                        >
+                          <Trash2 size={14} color="#DC2626" />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ─── RECORDS TAB ─── */}
-        {!loading && !error && activeTab === "records" && (
-          <div className="p-4 flex flex-col gap-3">
-            {/* Search + CSV */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
-                <Search
-                  size={15}
-                  className="absolute left-3 top-1/2 -translate-y-1/2"
-                  style={{ color: "oklch(var(--abl-green-mid))" }}
-                />
-                <input
-                  type="text"
-                  data-ocid="admin.search_input"
-                  placeholder="Search by name…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-2.5 text-sm rounded-xl outline-none"
-                  style={{
-                    background: "white",
-                    border: "1.5px solid oklch(var(--abl-green) / 0.2)",
-                    color: "oklch(var(--abl-green))",
-                  }}
-                />
-              </div>
-              <button
-                type="button"
-                data-ocid="admin.csv_download_button"
-                onClick={() => downloadCSV(filteredRecords)}
-                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold flex-shrink-0 transition-all active:scale-[0.97]"
-                style={{
-                  background: "oklch(var(--abl-green))",
-                  color: "white",
-                }}
-              >
-                <Download size={14} />
-                CSV
-              </button>
-            </div>
-
-            {/* Zone Filter */}
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-              {(
-                [
-                  {
-                    id: "all",
-                    label: "All",
-                    ocid: "admin.zone_filter_all_button",
-                  },
-                  {
-                    id: "needs_attention",
-                    label: "🔴 Needs Attention",
-                    ocid: "admin.zone_filter_na_button",
-                  },
-                  {
-                    id: "building_zone",
-                    label: "🟡 Building Zone",
-                    ocid: "admin.zone_filter_bz_button",
-                  },
-                  {
-                    id: "strong_area",
-                    label: "🟢 Strong Area",
-                    ocid: "admin.zone_filter_sa_button",
-                  },
-                ] as const
-              ).map(({ id, label, ocid }) => {
-                const isActive = zoneFilter === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    data-ocid={ocid}
-                    onClick={() => setZoneFilter(id)}
-                    className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all"
-                    style={{
-                      background: isActive
-                        ? "oklch(var(--abl-green))"
-                        : "white",
-                      color: isActive ? "white" : "oklch(var(--abl-green))",
-                      border: `1.5px solid oklch(var(--abl-green) / ${isActive ? "1" : "0.25"})`,
-                    }}
+          {/* ─── ANALYTICS TAB ─── */}
+          {!loading && !error && activeTab === "analytics" && (
+            <div
+              data-ocid="admin.analytics_section"
+              className="p-4 flex flex-col gap-4"
+            >
+              {/* Key stats row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div
+                  className="rounded-2xl p-4 flex flex-col gap-1"
+                  style={cardStyle}
+                >
+                  <p
+                    className="text-xs font-semibold"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
                   >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
+                    Total Submissions
+                  </p>
+                  <p
+                    className="text-3xl font-bold"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    {records.length}
+                  </p>
+                </div>
+                <div
+                  className="rounded-2xl p-4 flex flex-col gap-1"
+                  style={cardStyle}
+                >
+                  <p
+                    className="text-xs font-semibold"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
+                  >
+                    Avg Score
+                  </p>
+                  <p
+                    className="text-3xl font-bold"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    {completedRecords.length > 0 ? avgScore : "—"}
+                    {completedRecords.length > 0 && (
+                      <span className="text-sm font-normal opacity-60">
+                        /160
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
 
-            {/* Records List */}
-            {filteredRecords.length === 0 ? (
-              <div
-                className="rounded-2xl p-8 text-center"
-                style={cardStyle}
-                data-ocid="admin.records.empty_state"
-              >
+              {/* Zone distribution */}
+              <div className="rounded-2xl p-4" style={cardStyle}>
                 <p
-                  className="text-sm"
+                  className="text-xs font-bold uppercase tracking-wider mb-3"
                   style={{ color: "oklch(var(--abl-green-mid))" }}
                 >
-                  {search || zoneFilter !== "all"
-                    ? "No matching records found."
-                    : "No submissions yet."}
+                  Zone Distribution
                 </p>
+                {records.length === 0 ? (
+                  <p
+                    className="text-sm text-center py-4"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
+                  >
+                    No data yet.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {[
+                      {
+                        label: "🔴 Needs Attention",
+                        count: needsAttentionCount,
+                        color: "#DC2626",
+                        bg: "rgba(220,38,38,0.15)",
+                      },
+                      {
+                        label: "🟡 Building Zone",
+                        count: buildingZoneCount,
+                        color: "#D97706",
+                        bg: "rgba(217,119,6,0.15)",
+                      },
+                      {
+                        label: "🟢 Strong Area",
+                        count: strongAreaCount,
+                        color: "#004225",
+                        bg: "rgba(0,66,37,0.15)",
+                      },
+                      {
+                        label: "⬜ Incomplete",
+                        count: incompleteCount,
+                        color: "#6b7280",
+                        bg: "rgba(107,114,128,0.12)",
+                      },
+                    ].map(({ label, count, color, bg }) => {
+                      const pct =
+                        records.length > 0
+                          ? Math.round((count / records.length) * 100)
+                          : 0;
+                      return (
+                        <div key={label}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span
+                              className="text-xs font-semibold"
+                              style={{ color }}
+                            >
+                              {label}
+                            </span>
+                            <span
+                              className="text-xs font-bold"
+                              style={{ color }}
+                            >
+                              {count}{" "}
+                              <span className="font-normal opacity-70">
+                                ({pct}%)
+                              </span>
+                            </span>
+                          </div>
+                          <div
+                            className="h-2 rounded-full overflow-hidden"
+                            style={{ background: "oklch(var(--abl-bg))" }}
+                          >
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${pct}%`,
+                                background: bg,
+                                border: `1px solid ${color}55`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div
-                data-ocid="admin.records_table"
-                className="flex flex-col gap-2"
-              >
-                {filteredRecords.map((r, i) => {
-                  const zc = getZoneColors(r.category);
-                  return (
-                    <div
-                      key={String(r.id)}
-                      data-ocid={`admin.records.row.${i + 1}`}
-                      className="rounded-2xl p-3.5 flex items-center gap-3 transition-all"
-                      style={cardStyle}
-                    >
-                      {/* Index */}
-                      <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold"
-                        style={{
-                          background: "oklch(var(--abl-bg))",
-                          color: "oklch(var(--abl-green-mid))",
-                        }}
-                      >
-                        {i + 1}
-                      </div>
 
-                      {/* Info — clickable */}
-                      <button
-                        type="button"
-                        className="flex-1 min-w-0 cursor-pointer text-left"
-                        onClick={() => setSelectedRecord(r)}
-                      >
-                        <p
-                          className="text-sm font-semibold truncate"
-                          style={{ color: "oklch(var(--abl-green))" }}
+              {/* Last 7 days bar chart */}
+              <div className="rounded-2xl p-4" style={cardStyle}>
+                <p
+                  className="text-xs font-bold uppercase tracking-wider mb-3"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Submissions — Last 7 Days
+                </p>
+                {records.length === 0 ? (
+                  <p
+                    className="text-sm text-center py-4"
+                    style={{ color: "oklch(var(--abl-green-mid))" }}
+                  >
+                    No data yet.
+                  </p>
+                ) : (
+                  <div className="flex items-end gap-2 h-24">
+                    {last7Days.map(({ day, count }) => {
+                      const heightPct = Math.round((count / maxDayCount) * 100);
+                      return (
+                        <div
+                          key={day}
+                          className="flex-1 flex flex-col items-center gap-1"
                         >
-                          {r.name}
-                        </p>
-                        <p
-                          className="text-xs truncate mt-0.5"
-                          style={{ color: "oklch(var(--abl-green-mid))" }}
-                        >
-                          {r.age}y · {r.gender} · {r.whatsapp}
-                        </p>
-                        <p
-                          className="text-xs mt-0.5"
-                          style={{ color: "oklch(var(--abl-border))" }}
-                        >
-                          {formatDate(r.submittedAt)}
-                        </p>
-                      </button>
-
-                      {/* Score + Zone */}
-                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                        <p
-                          className="text-sm font-bold"
-                          style={{ color: "oklch(var(--abl-green))" }}
-                        >
-                          {Number(r.totalScore)}
-                          <span className="text-xs font-normal opacity-60">
-                            /160
+                          <span
+                            className="text-xs font-bold"
+                            style={{ color: "oklch(var(--abl-green))" }}
+                          >
+                            {count > 0 ? count : ""}
                           </span>
-                        </p>
-                        <span
-                          className="text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap"
-                          style={{
-                            background: zc.bg,
-                            color: zc.color,
-                            border: `1px solid ${zc.border}`,
-                          }}
-                        >
-                          {getZoneLabel(r.category)}
-                        </span>
-                      </div>
-
-                      {/* Delete */}
-                      <button
-                        type="button"
-                        data-ocid={`admin.delete_button.${i + 1}`}
-                        onClick={(e) => requestDelete(r.id, e)}
-                        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all active:scale-90"
-                        style={{
-                          background: "rgba(220,38,38,0.08)",
-                          border: "1px solid rgba(220,38,38,0.18)",
-                        }}
-                        title="Delete record"
-                      >
-                        <Trash2 size={14} color="#DC2626" />
-                      </button>
-                    </div>
-                  );
-                })}
+                          <div
+                            className="w-full rounded-t-lg overflow-hidden"
+                            style={{
+                              height: "64px",
+                              background: "oklch(var(--abl-bg))",
+                              display: "flex",
+                              alignItems: "flex-end",
+                            }}
+                          >
+                            <div
+                              className="w-full rounded-t-lg transition-all"
+                              style={{
+                                height: `${Math.max(heightPct, count > 0 ? 8 : 0)}%`,
+                                background:
+                                  count > 0
+                                    ? "oklch(var(--abl-green))"
+                                    : "transparent",
+                                opacity: 0.85,
+                              }}
+                            />
+                          </div>
+                          <span
+                            className="text-xs"
+                            style={{
+                              color: "oklch(var(--abl-green-mid))",
+                              fontSize: "10px",
+                            }}
+                          >
+                            {day}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+
+          {/* ─── SETTINGS TAB ─── */}
+          {!loading && !error && activeTab === "settings" && (
+            <div
+              data-ocid="admin.settings_section"
+              className="p-4 flex flex-col gap-4"
+            >
+              {/* Role badge */}
+              <div className="rounded-2xl p-4" style={cardStyle}>
+                <p
+                  className="text-xs font-bold uppercase tracking-wider mb-2"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Account Role
+                </p>
+                <span
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold"
+                  style={{
+                    background:
+                      role === "admin"
+                        ? "rgba(220,38,38,0.1)"
+                        : "oklch(var(--abl-gold) / 0.12)",
+                    color:
+                      role === "admin" ? "#DC2626" : "oklch(var(--abl-gold))",
+                    border: `1.5px solid ${role === "admin" ? "rgba(220,38,38,0.25)" : "oklch(var(--abl-gold) / 0.3)"}`,
+                  }}
+                >
+                  {role === "admin" ? "Admin" : "Health Coach"}
+                </span>
+              </div>
+
+              {/* Account info */}
+              <div className="rounded-2xl p-4" style={cardStyle}>
+                <p
+                  className="text-xs font-bold uppercase tracking-wider mb-3"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Account
+                </p>
+                <div className="flex flex-col gap-2">
+                  <div
+                    className="rounded-xl p-2.5"
+                    style={{ background: "oklch(var(--abl-bg))" }}
+                  >
+                    <p
+                      className="text-xs"
+                      style={{ color: "oklch(var(--abl-green-mid))" }}
+                    >
+                      Email
+                    </p>
+                    <p
+                      className="text-sm font-semibold mt-0.5"
+                      style={{ color: "oklch(var(--abl-green))" }}
+                    >
+                      {role === "admin"
+                        ? "admin@ablpulse.in"
+                        : "hc@ablpulse.in"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* App info */}
+              <div className="rounded-2xl p-4" style={cardStyle}>
+                <p
+                  className="text-xs font-bold uppercase tracking-wider mb-3"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  App Info
+                </p>
+                <div className="flex flex-col gap-2">
+                  {[
+                    ["Version", "v1.0"],
+                    ["WhatsApp", "+91 9199434365"],
+                    ["Support", "support@ablpulse.com"],
+                  ].map(([label, value]) => (
+                    <div
+                      key={label}
+                      className="rounded-xl p-2.5"
+                      style={{ background: "oklch(var(--abl-bg))" }}
+                    >
+                      <p
+                        className="text-xs"
+                        style={{ color: "oklch(var(--abl-green-mid))" }}
+                      >
+                        {label}
+                      </p>
+                      <p
+                        className="text-sm font-semibold mt-0.5"
+                        style={{ color: "oklch(var(--abl-green))" }}
+                      >
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Logout */}
+              <button
+                type="button"
+                data-ocid="admin.settings.logout_button"
+                onClick={onLogout}
+                className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold transition-all"
+                style={{
+                  background: "rgba(220,38,38,0.08)",
+                  color: "#DC2626",
+                  border: "1.5px solid rgba(220,38,38,0.2)",
+                }}
+              >
+                <X size={16} />
+                Logout
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Detail Modal */}
@@ -1228,7 +2182,7 @@ function LoginModal({
   onAdminLogin,
 }: {
   onClose: () => void;
-  onAdminLogin?: () => void;
+  onAdminLogin?: (role: "admin" | "hc") => void;
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
@@ -1290,7 +2244,7 @@ function LoginModal({
         password === DUMMY_CREDS.admin.password
       ) {
         onClose();
-        onAdminLogin?.();
+        onAdminLogin?.("admin");
       } else {
         setLoginError(
           "Invalid admin credentials. Please check email & password.",
@@ -1301,7 +2255,8 @@ function LoginModal({
         email === DUMMY_CREDS.hc.email &&
         password === DUMMY_CREDS.hc.password
       ) {
-        alert("HC Dashboard coming soon!");
+        onClose();
+        onAdminLogin?.("hc");
       } else {
         setLoginError("Invalid Health Coach credentials.");
       }
@@ -2640,15 +3595,6 @@ function ResultScreen({
       }
     };
 
-    // Check jsPDF is available before loading images
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const JsPDFClass = (window as any).jspdf?.jsPDF ?? (window as any).jsPDF;
-    if (!JsPDFClass) {
-      setIsGeneratingPDF(false);
-      alert("PDF library not loaded yet. Please wait a moment and try again.");
-      return;
-    }
-
     // Load images in parallel (non-blocking — failures handled gracefully)
     const [logoDataURL, drSumanDataURL] = await Promise.all([
       loadImageAsDataURL("/assets/uploads/ABL-Pulse-Logo-1.png"),
@@ -2670,13 +3616,6 @@ function ResultScreen({
       "Mind & Emotional Balance",
     ];
 
-    const sectionNamesHI = [
-      "नींद और हाइड्रेशन",
-      "गट क्लींज और मेटाबोलिक",
-      "मूवमेंट और सर्कुलेशन",
-      "माइंड और भावनात्मक संतुलन",
-    ];
-
     const sectionScoreArr = [
       result.pillarScores.sleep,
       result.pillarScores.gut,
@@ -2693,9 +3632,9 @@ function ResultScreen({
     ] as const;
 
     const getSectionZoneLabelColor = (score: number) => {
-      if (score <= 13) return { label: "🔴 Needs Attention", color: "#DC2626" };
-      if (score <= 26) return { label: "🟡 Building Zone", color: "#D97706" };
-      return { label: "🟢 Strong Area", color: "#004225" };
+      if (score <= 13) return { label: "Needs Attention", color: "#DC2626" };
+      if (score <= 26) return { label: "Building Zone", color: "#D97706" };
+      return { label: "Strong Area", color: "#004225" };
     };
 
     // Helper: get all zones suggestions for a section
@@ -2711,12 +3650,12 @@ function ResultScreen({
         if (score === 2) {
           buildingZoneItems.push({
             label: sugg.label,
-            text: lang === "en" ? sugg.building_zone.en : sugg.building_zone.hi,
+            text: sugg.building_zone.en,
           });
         } else if (score >= 3) {
           strongAreaItems.push({
             label: sugg.label,
-            text: lang === "en" ? sugg.strong_area.en : sugg.strong_area.hi,
+            text: sugg.strong_area.en,
           });
         }
       }
@@ -2725,8 +3664,7 @@ function ResultScreen({
 
     // ── Build jsPDF document ──
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const doc: any = new JsPDFClass({
+      const doc = new jsPDF({
         orientation: "portrait",
         unit: "mm",
         format: "a4",
@@ -2899,7 +3837,8 @@ function ResultScreen({
         align: "center",
       });
       y += 7;
-      const secNamesForTable = lang === "en" ? sectionNames : sectionNamesHI;
+      // PDF always uses English section names (font limitation)
+      const secNamesForTable = sectionNames;
       for (const i of [0, 1, 2, 3]) {
         const sc = sectionScoreArr[i];
         const { label: zl, color: zcol } = getSectionZoneLabelColor(sc);
@@ -2934,8 +3873,8 @@ function ResultScreen({
         if (buildingZoneItems.length === 0 && strongAreaItems.length === 0)
           continue;
         hasDoingWell = true;
-        const secName =
-          lang === "en" ? sectionNames[secIdx] : sectionNamesHI[secIdx];
+        // PDF always uses English (Helvetica can't render Devanagari)
+        const secName = sectionNames[secIdx];
 
         checkPage(18);
         // Card background
@@ -3013,9 +3952,10 @@ function ResultScreen({
         const { label: secZoneLabel, color: secZoneColor } =
           getSectionZoneLabelColor(secScore);
         const naItems = sectionNeedsAttention[i];
-        const secName = lang === "en" ? sectionNames[i] : sectionNamesHI[i];
+        // PDF always English (Helvetica limitation)
+        const secName = sectionNames[i];
 
-        const blockH = 16 + naItems.length * 9;
+        const blockH = Math.max(20, 16 + naItems.length * 12) + 10;
         checkPage(blockH);
 
         const cardStartY = y;
@@ -3042,8 +3982,8 @@ function ResultScreen({
           y += 5;
           for (const item of naItems) {
             checkPage(8);
-            const text =
-              lang === "en" ? item.suggestion.en : item.suggestion.hi;
+            // PDF always uses English text (Devanagari not supported in helvetica)
+            const text = item.suggestion.en;
             const lines = doc.splitTextToSize(`• ${text}`, contentW - 6);
             doc.setFont("helvetica", "normal");
             doc.setFontSize(8);
@@ -3077,7 +4017,7 @@ function ResultScreen({
       doc.text("1-on-1 Expert Consultation with Dr. Suman Lal", ml + 5, y + 7);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8.5);
-      doc.setTextColor("rgba(255,255,255,0.85)");
+      doc.setTextColor(220, 220, 220);
       const ctaLines = doc.splitTextToSize(
         "Apne Readiness Gap ko samajhne ke liye Dr. Suman Lal se 1-on-1 consultation book karein. Aapki assessment report ke basis par personalized guidance milegi.",
         contentW - 10,
@@ -3141,9 +4081,9 @@ function ResultScreen({
     } catch (err) {
       console.error("PDF generation error:", err);
       alert("PDF generation failed. Please try again.");
+    } finally {
+      setIsGeneratingPDF(false);
     }
-
-    setIsGeneratingPDF(false);
   };
 
   return (
@@ -3500,6 +4440,7 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
     email: "",
   });
   const [errors, setErrors] = useState<AssessmentErrors>({});
+  const [recordId, setRecordId] = useState<bigint | null>(null);
 
   // Load draft from localStorage on mount
   useEffect(() => {
@@ -3595,6 +4536,27 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
     if (validate()) {
       setStep("questionnaire");
       window.scrollTo({ top: 0, behavior: "smooth" });
+      // Fire-and-forget: save basic info to backend immediately
+      if (actor) {
+        actor
+          .saveBasicInfo(
+            form.name,
+            form.gender,
+            form.age,
+            form.profession,
+            form.weight,
+            form.height,
+            form.bp,
+            form.sugar,
+            form.thyroid,
+            form.whatsapp,
+            form.email || null,
+          )
+          .then((id) => {
+            setRecordId(id);
+          })
+          .catch(console.error);
+      }
     }
   };
 
@@ -3681,25 +4643,30 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
             return BigInt(answers[`s${sectionIdx}-q${questionIdx}`] ?? 0);
           });
           if (actor) {
-            actor
-              .submitAssessment(
-                form.name,
-                form.gender,
-                form.age,
-                form.profession,
-                form.weight,
-                form.height,
-                form.bp,
-                form.sugar,
-                form.thyroid,
-                form.whatsapp,
-                form.email || null,
-                answersArray,
-              )
-              .then(() => {
-                // Admin notification removed — user data privacy protected
-              })
-              .catch(console.error);
+            if (recordId !== null) {
+              // Update existing partial record with full answers + scores
+              actor
+                .updateAssessmentResult(recordId, answersArray)
+                .catch(console.error);
+            } else {
+              // Fallback: full submission if saveBasicInfo was not called
+              actor
+                .submitAssessment(
+                  form.name,
+                  form.gender,
+                  form.age,
+                  form.profession,
+                  form.weight,
+                  form.height,
+                  form.bp,
+                  form.sugar,
+                  form.thyroid,
+                  form.whatsapp,
+                  form.email || null,
+                  answersArray,
+                )
+                .catch(console.error);
+            }
           }
         }}
       />
@@ -6463,6 +7430,7 @@ export default function App() {
   >("home");
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
+  const [adminRole, setAdminRole] = useState<"admin" | "hc">("admin");
 
   const sectionIds = [
     "home",
@@ -6527,14 +7495,18 @@ export default function App() {
 
       {/* Admin Dashboard (full-screen overlay) */}
       {showAdminDashboard && (
-        <AdminDashboard onLogout={() => setShowAdminDashboard(false)} />
+        <AdminDashboard
+          onLogout={() => setShowAdminDashboard(false)}
+          role={adminRole}
+        />
       )}
 
       {/* Login modal (on top of everything) */}
       {loginModalOpen && (
         <LoginModal
           onClose={() => setLoginModalOpen(false)}
-          onAdminLogin={() => {
+          onAdminLogin={(role) => {
+            setAdminRole(role);
             setLoginModalOpen(false);
             setShowAdminDashboard(true);
           }}

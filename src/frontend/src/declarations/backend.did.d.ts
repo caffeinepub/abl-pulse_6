@@ -36,6 +36,22 @@ export interface _SERVICE {
   'deleteSubmission' : ActorMethod<[bigint], boolean>,
   'getSubmissionById' : ActorMethod<[bigint], [] | [HealthSeekerRecord]>,
   'getSubmissions' : ActorMethod<[], Array<HealthSeekerRecord>>,
+  'saveBasicInfo' : ActorMethod<
+    [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      [] | [string],
+    ],
+    bigint
+  >,
   'submitAssessment' : ActorMethod<
     [
       string,
@@ -53,6 +69,7 @@ export interface _SERVICE {
     ],
     bigint
   >,
+  'updateAssessmentResult' : ActorMethod<[bigint, Array<bigint>], boolean>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

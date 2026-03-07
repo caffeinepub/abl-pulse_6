@@ -33,5 +33,7 @@ export interface backendInterface {
     deleteSubmission(id: bigint): Promise<boolean>;
     getSubmissionById(id: bigint): Promise<HealthSeekerRecord | null>;
     getSubmissions(): Promise<Array<HealthSeekerRecord>>;
+    saveBasicInfo(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null): Promise<bigint>;
     submitAssessment(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null, answers: Array<bigint>): Promise<bigint>;
+    updateAssessmentResult(id: bigint, answers: Array<bigint>): Promise<boolean>;
 }

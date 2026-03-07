@@ -115,7 +115,9 @@ export interface backendInterface {
     deleteSubmission(id: bigint): Promise<boolean>;
     getSubmissionById(id: bigint): Promise<HealthSeekerRecord | null>;
     getSubmissions(): Promise<Array<HealthSeekerRecord>>;
+    saveBasicInfo(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null): Promise<bigint>;
     submitAssessment(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null, answers: Array<bigint>): Promise<bigint>;
+    updateAssessmentResult(id: bigint, answers: Array<bigint>): Promise<boolean>;
 }
 import type { HealthSeekerRecord as _HealthSeekerRecord } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
@@ -162,6 +164,20 @@ export class Backend implements backendInterface {
             return from_candid_vec_n5(this._uploadFile, this._downloadFile, result);
         }
     }
+    async saveBasicInfo(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string, arg5: string, arg6: string, arg7: string, arg8: string, arg9: string, arg10: string | null): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.saveBasicInfo(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, to_candid_opt_n6(this._uploadFile, this._downloadFile, arg10));
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.saveBasicInfo(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, to_candid_opt_n6(this._uploadFile, this._downloadFile, arg10));
+            return result;
+        }
+    }
     async submitAssessment(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string, arg5: string, arg6: string, arg7: string, arg8: string, arg9: string, arg10: string | null, arg11: Array<bigint>): Promise<bigint> {
         if (this.processError) {
             try {
@@ -173,6 +189,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.submitAssessment(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, to_candid_opt_n6(this._uploadFile, this._downloadFile, arg10), arg11);
+            return result;
+        }
+    }
+    async updateAssessmentResult(arg0: bigint, arg1: Array<bigint>): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.updateAssessmentResult(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.updateAssessmentResult(arg0, arg1);
             return result;
         }
     }
