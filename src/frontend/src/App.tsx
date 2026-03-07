@@ -1,3 +1,4 @@
+import jsPDF from "jspdf";
 import {
   Activity,
   ArrowLeft,
@@ -27,6 +28,7 @@ import {
 } from "lucide-react";
 import {
   type CSSProperties,
+  type MouseEvent,
   useCallback,
   useEffect,
   useRef,
@@ -452,6 +454,100 @@ function AdminDetailModal({
 }
 
 /* ─────────────────────────────────────────────
+   DELETE CONFIRMATION DIALOG
+───────────────────────────────────────────── */
+function DeleteConfirmDialog({
+  onConfirm,
+  onCancel,
+  isDeleting,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+  isDeleting: boolean;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isDeleting) onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel, isDeleting]);
+
+  return (
+    <div
+      data-ocid="admin.delete.dialog"
+      className="fixed inset-0 z-[1200] flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+    >
+      <div
+        className="w-full max-w-xs rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          background: "white",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+        }}
+      >
+        <div
+          className="px-5 py-4"
+          style={{ borderBottom: "1px solid rgba(220,38,38,0.12)" }}
+        >
+          <h3
+            className="font-display font-bold text-base mb-1"
+            style={{ color: "#DC2626" }}
+          >
+            Delete Record?
+          </h3>
+          <p
+            className="text-sm"
+            style={{ color: "oklch(var(--abl-green-mid))" }}
+          >
+            This action cannot be undone. The record will be permanently
+            removed.
+          </p>
+        </div>
+        <div className="flex gap-2 p-4">
+          <button
+            type="button"
+            data-ocid="admin.delete.cancel_button"
+            onClick={onCancel}
+            disabled={isDeleting}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            style={{
+              background: "oklch(var(--abl-bg))",
+              color: "oklch(var(--abl-green))",
+              border: "1.5px solid oklch(var(--abl-green) / 0.2)",
+              opacity: isDeleting ? 0.5 : 1,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            data-ocid="admin.delete.confirm_button"
+            onClick={onConfirm}
+            disabled={isDeleting}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5"
+            style={{
+              background: "#DC2626",
+              color: "white",
+              opacity: isDeleting ? 0.7 : 1,
+            }}
+          >
+            {isDeleting ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Deleting…
+              </>
+            ) : (
+              "Delete"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
    ADMIN DASHBOARD
 ───────────────────────────────────────────── */
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
@@ -468,13 +564,19 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   >("all");
   const [selectedRecord, setSelectedRecord] =
     useState<HealthSeekerRecord | null>(null);
-  const [localDeleted, setLocalDeleted] = useState<Set<bigint>>(new Set());
+  // Delete confirmation state
+  const [pendingDeleteId, setPendingDeleteId] = useState<bigint | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  // Auto-retry state for backend restarting
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Prevent body scroll
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = "";
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
 
@@ -494,10 +596,20 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         Number(b.submittedAt - a.submittedAt),
       );
       setRecords(sorted);
+      // Reset retry count on success
+      retryCountRef.current = 0;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("stopped") || msg.includes("IC0508")) {
+      const isRestarting = msg.includes("stopped") || msg.includes("IC0508");
+      if (isRestarting) {
         setError("Backend is restarting. Please wait a moment and try again.");
+        // Auto-retry up to 10 times, every 3 seconds
+        if (retryCountRef.current < 10) {
+          retryCountRef.current += 1;
+          retryTimerRef.current = setTimeout(() => {
+            fetchRecords();
+          }, 3000);
+        }
       } else {
         setError("Failed to load records. Please try again.");
       }
@@ -511,31 +623,49 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     fetchRecords();
   }, [fetchRecords]);
 
-  // Filtered records (excluding locally deleted)
-  const visibleRecords = records.filter((r) => !localDeleted.has(r.id));
-
-  const filteredRecords = visibleRecords.filter((r) => {
+  const filteredRecords = records.filter((r) => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase());
     const matchZone = zoneFilter === "all" || r.category === zoneFilter;
     return matchSearch && matchZone;
   });
 
   // Zone counts
-  const needsAttentionCount = visibleRecords.filter(
+  const needsAttentionCount = records.filter(
     (r) => r.category === "needs_attention",
   ).length;
-  const buildingZoneCount = visibleRecords.filter(
+  const buildingZoneCount = records.filter(
     (r) => r.category === "building_zone",
   ).length;
-  const strongAreaCount = visibleRecords.filter(
+  const strongAreaCount = records.filter(
     (r) => r.category === "strong_area",
   ).length;
 
-  const recentRecords = visibleRecords.slice(0, 5);
+  const recentRecords = records.slice(0, 5);
 
-  const handleDelete = (id: bigint) => {
-    setLocalDeleted((prev) => new Set(prev).add(id));
-    if (selectedRecord?.id === id) setSelectedRecord(null);
+  // Request delete: show confirmation dialog
+  const requestDelete = (id: bigint, e: MouseEvent) => {
+    e.stopPropagation();
+    setPendingDeleteId(id);
+  };
+
+  // Confirm delete: call backend, then refresh
+  const confirmDelete = async () => {
+    if (!pendingDeleteId || !actor) return;
+    setIsDeleting(true);
+    try {
+      await actor.deleteSubmission(BigInt(pendingDeleteId));
+      // Close detail modal if this record was open
+      if (selectedRecord?.id === pendingDeleteId) setSelectedRecord(null);
+      setPendingDeleteId(null);
+      // Reload records from backend
+      await fetchRecords();
+    } catch (e: unknown) {
+      console.error("Delete failed:", e);
+      setError("Failed to delete record. Please try again.");
+      setPendingDeleteId(null);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Shared card style
@@ -662,14 +792,25 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             }}
           >
             <X size={18} color="#DC2626" />
-            <p className="text-sm font-medium" style={{ color: "#DC2626" }}>
+            <p
+              className="text-sm font-medium flex-1"
+              style={{ color: "#DC2626" }}
+            >
               {error}
             </p>
             <button
               type="button"
-              onClick={fetchRecords}
-              className="ml-auto text-xs font-bold underline"
-              style={{ color: "#DC2626" }}
+              data-ocid="admin.retry_button"
+              onClick={() => {
+                retryCountRef.current = 0;
+                if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+                fetchRecords();
+              }}
+              className="ml-auto text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all"
+              style={{
+                background: "#DC2626",
+                color: "white",
+              }}
             >
               Retry
             </button>
@@ -694,7 +835,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                 className="text-2xl font-bold"
                 style={{ color: "oklch(var(--abl-green))" }}
               >
-                {visibleRecords.length}
+                {records.length}
               </p>
             </div>
 
@@ -1032,10 +1173,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                       <button
                         type="button"
                         data-ocid={`admin.delete_button.${i + 1}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(r.id);
-                        }}
+                        onClick={(e) => requestDelete(r.id, e)}
                         className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all active:scale-90"
                         style={{
                           background: "rgba(220,38,38,0.08)",
@@ -1059,6 +1197,17 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         <AdminDetailModal
           record={selectedRecord}
           onClose={() => setSelectedRecord(null)}
+        />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {pendingDeleteId !== null && (
+        <DeleteConfirmDialog
+          onConfirm={confirmDelete}
+          onCancel={() => {
+            if (!isDeleting) setPendingDeleteId(null);
+          }}
+          isDeleting={isDeleting}
         />
       )}
     </div>
@@ -1544,6 +1693,8 @@ import { type ScoreResult, calculateScore } from "./logic/scoring";
 /* ─────────────────────────────────────────────
    QUESTIONNAIRE STEP
 ───────────────────────────────────────────── */
+const ANSWERS_DRAFT_KEY = "ablpulse_answers_draft";
+
 function QuestionnaireStep({
   lang,
   onLangToggle,
@@ -1556,7 +1707,16 @@ function QuestionnaireStep({
   onDone: (answers: Record<string, number>) => void;
 }) {
   const [currentSection, setCurrentSection] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [answers, setAnswers] = useState<Record<string, number>>(() => {
+    // Restore saved answers from localStorage on mount
+    try {
+      const raw = localStorage.getItem(ANSWERS_DRAFT_KEY);
+      if (raw) return JSON.parse(raw) as Record<string, number>;
+    } catch {
+      /* ignore */
+    }
+    return {};
+  });
   const [showPreview, setShowPreview] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -1595,6 +1755,17 @@ function QuestionnaireStep({
       onDone(answers);
     }
   };
+
+  // Auto-save answers to localStorage on every change
+  useEffect(() => {
+    try {
+      if (Object.keys(answers).length > 0) {
+        localStorage.setItem(ANSWERS_DRAFT_KEY, JSON.stringify(answers));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [answers]);
 
   const setAnswer = (
     sectionIdx: number,
@@ -1723,9 +1894,8 @@ function QuestionnaireStep({
     <>
       {showPreview && <PreviewModal />}
       <div
-        ref={containerRef}
         data-ocid="assessment.page"
-        className="fixed inset-0 z-[900] flex flex-col overflow-y-auto"
+        className="fixed inset-0 z-[900] flex flex-col overflow-hidden"
         style={{ background: "oklch(var(--abl-bg))" }}
       >
         {/* Decorative background */}
@@ -1854,8 +2024,11 @@ function QuestionnaireStep({
         </div>
 
         {/* ── Section content ── */}
-        <div className="relative z-10 flex-1 pb-32">
-          <div className="max-w-2xl mx-auto px-4 pt-6">
+        <div
+          ref={containerRef}
+          className="relative z-10 flex-1 overflow-y-auto pb-[220px] md:pb-32"
+        >
+          <div className="max-w-2xl mx-auto px-4 pt-4">
             {/* Section header */}
             <div className="mb-6">
               <h2
@@ -1913,8 +2086,8 @@ function QuestionnaireStep({
                       </p>
                     </div>
 
-                    {/* Options — 5 pills in a flex-wrap row */}
-                    <div className="flex flex-wrap gap-2">
+                    {/* Options — 5 pills in a grid row */}
+                    <div className="grid grid-cols-5 gap-1.5">
                       {options.map((opt, oi) => {
                         const isSelected = selectedOption === oi;
                         return (
@@ -1923,7 +2096,7 @@ function QuestionnaireStep({
                             type="button"
                             data-ocid={`questionnaire.option.${currentSection}-${qi}-${oi}`}
                             onClick={() => setAnswer(currentSection, qi, oi)}
-                            className="flex-1 min-w-[calc(20%-0.5rem)] py-2.5 px-2 rounded-xl text-xs font-semibold transition-all"
+                            className="py-2 px-1 rounded-xl text-[10px] sm:text-xs font-semibold transition-all text-center leading-tight"
                             style={{
                               minHeight: "44px",
                               background: isSelected
@@ -1972,15 +2145,15 @@ function QuestionnaireStep({
 
         {/* ── Sticky bottom CTA ── */}
         <div
-          className="sticky bottom-0 z-10 flex-shrink-0"
+          className="sticky bottom-0 z-[950] flex-shrink-0"
           style={{
             background:
-              "linear-gradient(to top, white 70%, rgba(255,255,255,0) 100%)",
+              "linear-gradient(to top, white 80%, rgba(255,255,255,0) 100%)",
             paddingTop: "1rem",
-            paddingBottom: "env(safe-area-inset-bottom, 0.75rem)",
+            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)",
           }}
         >
-          <div className="max-w-2xl mx-auto px-4 pb-3">
+          <div className="max-w-2xl mx-auto px-4 pb-[72px] md:pb-3">
             <button
               type="button"
               data-ocid={
@@ -2439,11 +2612,11 @@ function ResultScreen({
     SECTION4_SUGGESTIONS,
   ] as const;
 
-  /* ── R3 + R4: PDF Generation via print window ── */
+  /* ── R3 + R4: PDF Generation via jsPDF (direct download) ── */
   const generatePDF = async () => {
     setIsGeneratingPDF(true);
 
-    // Helper: load image URL → base64 data URL so it renders in the print window
+    // Helper: load image URL → base64 data URL
     const loadImageAsDataURL = async (url: string): Promise<string> => {
       try {
         const response = await fetch(url);
@@ -2454,7 +2627,7 @@ function ResultScreen({
           reader.readAsDataURL(blob);
         });
       } catch {
-        return ""; // empty string → onerror hides the img
+        return "";
       }
     };
 
@@ -2471,20 +2644,6 @@ function ResultScreen({
     const s2Items = getSection2NeedsAttention(answers);
     const s3Items = getSection3NeedsAttention(answers);
     const s4Items = getSection4NeedsAttention(answers);
-
-    const zoneLabel =
-      result.category === "needs_attention"
-        ? "🔴 Needs Attention"
-        : result.category === "building_zone"
-          ? "🟡 Building Zone"
-          : "🟢 Strong Area";
-
-    const zoneColor =
-      result.category === "needs_attention"
-        ? "#DC2626"
-        : result.category === "building_zone"
-          ? "#D97706"
-          : "#004225";
 
     const sectionNames = [
       "Sleep & Hydration",
@@ -2546,345 +2705,432 @@ function ResultScreen({
       return { buildingZoneItems, strongAreaItems };
     };
 
-    // Build "What You Are Doing Well" section HTML (building + strong items)
-    const buildDoingWellHtml = () => {
-      let html = "";
+    // ── Build jsPDF document ──
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+      const pageW = 210;
+      const pageH = 297;
+      const ml = 18; // margin left
+      const mr = 18; // margin right
+      const mt = 15; // margin top
+      const mb = 18; // margin bottom
+      const contentW = pageW - ml - mr;
+      let y = mt;
+
+      const green = "#004225";
+      const gold = "#9E6B3D";
+      const gray = "#6b7280";
+      const red = "#DC2626";
+      const amber = "#D97706";
+
+      // Helper: add page header
+      const addHeader = () => {
+        y = mt;
+        // Logo
+        if (logoDataURL) {
+          try {
+            doc.addImage(logoDataURL, "PNG", ml, y, 14, 14);
+          } catch {
+            /* skip */
+          }
+        }
+        // Title block
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(18);
+        doc.setTextColor(green);
+        doc.text("ABL PULSE", ml + 17, y + 5);
+        doc.setFontSize(9);
+        doc.setTextColor(gold);
+        doc.setFont("helvetica", "bold");
+        doc.text("Ayurved Banaye Life", ml + 17, y + 10);
+        doc.setFontSize(7.5);
+        doc.setTextColor(gray);
+        doc.setFont("helvetica", "normal");
+        doc.text(
+          "Old Museum South Wall, Dak-bangla Churaha, Near Kotwali Thana, Patna 1",
+          ml + 17,
+          y + 14,
+        );
+        doc.setFontSize(8);
+        doc.setTextColor(green);
+        doc.setFont("helvetica", "bold");
+        doc.text("WhatsApp / Call: +91 9199434365", ml + 17, y + 18);
+        // Divider line
+        y += 22;
+        doc.setDrawColor(green);
+        doc.setLineWidth(0.7);
+        doc.line(ml, y, ml + contentW, y);
+        y += 6;
+      };
+
+      // Helper: section label
+      const sectionLabel = (label: string) => {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(green);
+        doc.text(label.toUpperCase(), ml, y);
+        y += 1.5;
+        doc.setDrawColor("#e5e7eb");
+        doc.setLineWidth(0.3);
+        doc.line(ml, y, ml + contentW, y);
+        y += 5;
+      };
+
+      // Helper: add new page
+      const newPage = () => {
+        doc.addPage();
+        addHeader();
+      };
+
+      // Helper: check page overflow
+      const checkPage = (needed: number) => {
+        if (y + needed > pageH - mb) {
+          newPage();
+        }
+      };
+
+      // ── PAGE 1 ──
+      addHeader();
+
+      // Health Seeker Details
+      sectionLabel("Health Seeker Details");
+      const fields = [
+        ["Name", userName || "—"],
+        ["Age", userAge || "—"],
+        ["Gender", userGender || "—"],
+        ["Date", dateStr],
+      ];
+      const fieldW = contentW / 4;
+      fields.forEach(([label, value], i) => {
+        const fx = ml + i * fieldW;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.setTextColor(gold);
+        doc.text(label.toUpperCase(), fx, y);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(green);
+        doc.text(value, fx, y + 4.5);
+      });
+      y += 12;
+
+      // Overall Score
+      checkPage(28);
+      sectionLabel("Overall Health Readiness Score");
+      // Score box background
+      doc.setFillColor(240, 253, 244);
+      doc.setDrawColor(green);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(ml, y, contentW, 22, 3, 3, "FD");
+      // Score number
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(32);
+      doc.setTextColor(green);
+      doc.text(String(result.totalScore), ml + 8, y + 15);
+      doc.setFontSize(12);
+      doc.setTextColor(gray);
+      doc.setFont("helvetica", "normal");
+      doc.text(
+        "/160",
+        ml + 8 + doc.getTextWidth(String(result.totalScore)) + 1,
+        y + 15,
+      );
+      // Zone pill
+      const zc =
+        result.category === "needs_attention"
+          ? red
+          : result.category === "building_zone"
+            ? amber
+            : green;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(zc);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(ml + contentW - 48, y + 6, 44, 10, 2, 2, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(zc);
+      const zoneText =
+        result.category === "needs_attention"
+          ? "Needs Attention"
+          : result.category === "building_zone"
+            ? "Building Zone"
+            : "Strong Area";
+      doc.text(zoneText, ml + contentW - 26, y + 12.5, { align: "center" });
+      y += 28;
+
+      // Section Summary Table
+      checkPage(35);
+      sectionLabel("Section-wise Summary");
+      const colW = [contentW * 0.5, contentW * 0.25, contentW * 0.25];
+      // Table header
+      doc.setFillColor(249, 250, 251);
+      doc.rect(ml, y, contentW, 7, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(gray);
+      doc.text("Section", ml + 2, y + 4.8);
+      doc.text("Score", ml + colW[0] + colW[1] / 2, y + 4.8, {
+        align: "center",
+      });
+      doc.text("Zone", ml + colW[0] + colW[1] + colW[2] / 2, y + 4.8, {
+        align: "center",
+      });
+      y += 7;
+      const secNamesForTable = lang === "en" ? sectionNames : sectionNamesHI;
+      for (const i of [0, 1, 2, 3]) {
+        const sc = sectionScoreArr[i];
+        const { label: zl, color: zcol } = getSectionZoneLabelColor(sc);
+        doc.setDrawColor("#e5e7eb");
+        doc.setLineWidth(0.2);
+        doc.rect(ml, y, contentW, 7);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor("#1f2937");
+        doc.text(secNamesForTable[i], ml + 2, y + 4.8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(green);
+        doc.text(`${sc}/40`, ml + colW[0] + colW[1] / 2, y + 4.8, {
+          align: "center",
+        });
+        doc.setTextColor(zcol);
+        doc.text(zl, ml + colW[0] + colW[1] + colW[2] / 2, y + 4.8, {
+          align: "center",
+        });
+        y += 7;
+      }
+      y += 6;
+
+      // What You Are Doing Well
+      checkPage(20);
+      sectionLabel("What You Are Doing Well");
+
+      let hasDoingWell = false;
       for (let secIdx = 0; secIdx < 4; secIdx++) {
         const { buildingZoneItems, strongAreaItems } =
           getSectionAllZoneSuggestions(secIdx);
         if (buildingZoneItems.length === 0 && strongAreaItems.length === 0)
           continue;
+        hasDoingWell = true;
         const secName =
           lang === "en" ? sectionNames[secIdx] : sectionNamesHI[secIdx];
-        html += `<div style="margin-bottom: 14px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fafffe; break-inside: avoid;">
-          <p style="font-size: 12px; font-weight: 700; color: #004225; margin: 0 0 8px 0;">${secName}</p>`;
+
+        checkPage(18);
+        // Card background
+        doc.setFillColor(250, 255, 254);
+        doc.setDrawColor("#e5e7eb");
+        doc.setLineWidth(0.3);
+        const startY = y;
+        // Section name
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(green);
+        doc.text(secName, ml + 3, y + 5);
+        y += 8;
+
         if (buildingZoneItems.length > 0) {
-          html += `<p style="font-size: 10px; font-weight: 700; color: #D97706; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px;">🟡 Building Zone</p>
-          <ul style="margin: 0 0 8px 0; padding-left: 18px; list-style: disc;">
-            ${buildingZoneItems.map((item) => `<li style="font-size: 11px; color: #374151; margin-bottom: 3px; line-height: 1.5;">${item.text}</li>`).join("")}
-          </ul>`;
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7.5);
+          doc.setTextColor(amber);
+          doc.text("Building Zone", ml + 3, y + 3.5);
+          y += 6;
+          for (const item of buildingZoneItems) {
+            checkPage(8);
+            const lines = doc.splitTextToSize(`• ${item.text}`, contentW - 6);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8);
+            doc.setTextColor("#374151");
+            doc.text(lines, ml + 3, y);
+            y += lines.length * 4 + 1;
+          }
         }
         if (strongAreaItems.length > 0) {
-          html += `<p style="font-size: 10px; font-weight: 700; color: #004225; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px;">🟢 Strong Area</p>
-          <ul style="margin: 0; padding-left: 18px; list-style: disc;">
-            ${strongAreaItems.map((item) => `<li style="font-size: 11px; color: #374151; margin-bottom: 3px; line-height: 1.5;">${item.text}</li>`).join("")}
-          </ul>`;
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7.5);
+          doc.setTextColor(green);
+          doc.text("Strong Area", ml + 3, y + 3.5);
+          y += 6;
+          for (const item of strongAreaItems) {
+            checkPage(8);
+            const lines = doc.splitTextToSize(`• ${item.text}`, contentW - 6);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8);
+            doc.setTextColor("#374151");
+            doc.text(lines, ml + 3, y);
+            y += lines.length * 4 + 1;
+          }
         }
-        html += "</div>";
+
+        // Draw card border around the section block
+        doc.setFillColor(250, 255, 254);
+        doc.setDrawColor("#e5e7eb");
+        doc.setLineWidth(0.3);
+        doc.roundedRect(ml, startY, contentW, y - startY + 2, 2, 2);
+        y += 5;
       }
-      if (!html) {
-        html = `<p style="font-size: 11px; color: #6b7280; font-style: italic;">Keep building consistent habits to see your strong areas grow!</p>`;
+      if (!hasDoingWell) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8.5);
+        doc.setTextColor(gray);
+        doc.text(
+          "Keep building consistent habits to see your strong areas grow!",
+          ml,
+          y,
+        );
+        y += 8;
       }
-      return html;
-    };
 
-    // Build "Areas to Focus On" section HTML (Needs Attention items)
-    const buildFocusHtml = (secIdx: number) => {
-      const secScore = sectionScoreArr[secIdx];
-      const { label: secZoneLabel, color: secZoneColor } =
-        getSectionZoneLabelColor(secScore);
-      const naItems = sectionNeedsAttention[secIdx];
-      const secName =
-        lang === "en" ? sectionNames[secIdx] : sectionNamesHI[secIdx];
-      const naHtml =
-        naItems.length > 0
-          ? `<ul style="margin: 6px 0 0 0; padding-left: 18px; list-style: disc;">${naItems
-              .map(
-                (item) =>
-                  `<li style="font-size: 11px; color: #374151; margin-bottom: 4px; line-height: 1.5;">${lang === "en" ? item.suggestion.en : item.suggestion.hi}</li>`,
-              )
-              .join("")}</ul>`
-          : `<p style="font-size: 11px; color: #6b7280; margin: 4px 0 0 0; font-style: italic;">All habits on track – no attention needed.</p>`;
+      // ── PAGE 2 ──
+      newPage();
 
-      return `
-        <div style="margin-bottom: 14px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: white; break-inside: avoid;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
-            <div>
-              <p style="font-size: 13px; font-weight: 700; color: #004225; margin: 0;">${secName}</p>
-              <p style="font-size: 11px; color: #6b7280; margin: 2px 0 0 0;">Score: ${secScore}/40</p>
-            </div>
-            <span style="font-size: 11px; font-weight: 700; color: ${secZoneColor}; background: ${secZoneColor}20; padding: 3px 8px; border-radius: 20px;">${secZoneLabel}</span>
-          </div>
-          ${naItems.length > 0 ? `<p style="font-size: 11px; font-weight: 700; color: #DC2626; margin: 8px 0 2px 0;">🔴 Needs Attention:</p>${naHtml}` : naHtml}
-        </div>`;
-    };
+      // Areas to Focus On
+      sectionLabel("Areas to Focus On");
 
-    // Section summary table rows
-    const sectionTableRows = [0, 1, 2, 3]
-      .map((i) => {
-        const { label, color } = getSectionZoneLabelColor(sectionScoreArr[i]);
+      for (let i = 0; i < 4; i++) {
+        const secScore = sectionScoreArr[i];
+        const { label: secZoneLabel, color: secZoneColor } =
+          getSectionZoneLabelColor(secScore);
+        const naItems = sectionNeedsAttention[i];
         const secName = lang === "en" ? sectionNames[i] : sectionNamesHI[i];
-        return `<tr>
-          <td style="padding: 8px; font-size: 11px; color: #1f2937; border: 1px solid #e5e7eb;">${secName}</td>
-          <td style="padding: 8px; text-align: center; font-size: 11px; font-weight: 700; color: #004225; border: 1px solid #e5e7eb;">${sectionScoreArr[i]}/40</td>
-          <td style="padding: 8px; text-align: center; font-size: 11px; font-weight: 700; color: ${color}; border: 1px solid #e5e7eb;">${label}</td>
-        </tr>`;
-      })
-      .join("");
 
-    const logoImgTag = logoDataURL
-      ? `<img class="header-logo" src="${logoDataURL}" alt="ABL Pulse" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div style="display:none;width:56px;height:56px;background:#004225;border-radius:8px;align-items:center;justify-content:center;color:white;font-weight:800;font-size:10px;flex-shrink:0;">ABL</div>`
-      : `<div style="width:56px;height:56px;background:#004225;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:10px;flex-shrink:0;">ABL</div>`;
+        const blockH = 16 + naItems.length * 9;
+        checkPage(blockH);
 
-    const drImgTag = drSumanDataURL
-      ? `<img class="footer-dr-img" src="${drSumanDataURL}" alt="Dr. Suman Lal" />`
-      : `<div style="width:48px;height:48px;border-radius:50%;background:#e5e7eb;border:2px solid #004225;"></div>`;
+        const cardStartY = y;
+        // Section header row
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(green);
+        doc.text(secName, ml + 3, y + 5);
+        doc.setFontSize(8);
+        doc.setTextColor(gray);
+        doc.text(`Score: ${secScore}/40`, ml + 3, y + 9.5);
+        // Zone pill
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(secZoneColor);
+        doc.text(secZoneLabel, ml + contentW - 3, y + 5, { align: "right" });
+        y += 13;
 
-    const sharedHeader = `
-  <div class="header">
-    ${logoImgTag}
-    <div class="header-text">
-      <div class="header-title">ABL PULSE</div>
-      <div class="header-subtitle">Ayurved Banaye Life</div>
-      <div class="header-address">Old Museum South Wall, Dak-bangla Churaha, Near Kotwali Thana, Patna 1</div>
-      <div class="header-contact">📞 WhatsApp / Call: +91 9199434365</div>
-    </div>
-  </div>`;
-
-    const sharedFooter = `
-  <div class="footer">
-    <div class="footer-sig">
-      ${drImgTag}
-      <div>
-        <div class="footer-name">Dr. Suman Lal</div>
-        <div class="footer-desig">Naturopathy Practitioner | Doctorate in Psychology</div>
-        <div style="font-size:9px;color:#6b7280;margin-top:2px;font-style:italic;">Authorized Signature</div>
-      </div>
-    </div>
-    <div class="footer-brand">
-      <div class="footer-brand-name">ABL PULSE</div>
-      <div class="footer-brand-tagline">Ayurved Banaye Life</div>
-      <div class="footer-date">Generated: ${dateStr}</div>
-    </div>
-  </div>`;
-
-    const htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>ABL PULSE Health Report – ${userName || "Health Seeker"}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    @page {
-      size: A4;
-      margin: 20mm;
-    }
-    body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      color: #1f2937;
-      background: white;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    .page { width: 100%; }
-    .header {
-      display: flex;
-      align-items: flex-start;
-      gap: 16px;
-      padding-bottom: 14px;
-      border-bottom: 2.5px solid #004225;
-      margin-bottom: 16px;
-    }
-    .header-logo { width: 56px; height: 56px; object-fit: contain; flex-shrink: 0; }
-    .header-text { flex: 1; }
-    .header-title { font-size: 22px; font-weight: 800; color: #004225; letter-spacing: -0.5px; }
-    .header-subtitle { font-size: 11px; color: #9E6B3D; font-weight: 600; margin-top: 2px; }
-    .header-address { font-size: 10px; color: #6b7280; margin-top: 4px; line-height: 1.4; }
-    .header-contact { font-size: 10.5px; color: #004225; font-weight: 700; margin-top: 3px; }
-
-    .section-title {
-      font-size: 12px;
-      font-weight: 800;
-      color: #004225;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      margin-bottom: 8px;
-      padding-bottom: 4px;
-      border-bottom: 1px solid #e5e7eb;
-    }
-
-    .seeker-row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 14px; padding: 12px 16px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; }
-    .seeker-field { display: flex; flex-direction: column; }
-    .seeker-label { font-size: 10px; color: #9b7653; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-    .seeker-value { font-size: 13px; font-weight: 700; color: #004225; margin-top: 2px; }
-
-    .score-box {
-      text-align: center;
-      padding: 16px;
-      background: linear-gradient(135deg, #f0fdf4, #e8f5e9);
-      border: 2px solid #004225;
-      border-radius: 12px;
-      margin-bottom: 16px;
-    }
-    .score-num { font-size: 40px; font-weight: 900; color: #004225; line-height: 1; }
-    .score-max { font-size: 18px; color: #6b7280; font-weight: 600; }
-    .score-zone { font-size: 16px; font-weight: 800; margin-top: 6px; }
-
-    .expert-cta {
-      background: linear-gradient(135deg, #004225, #006635);
-      color: white;
-      padding: 14px 16px;
-      border-radius: 10px;
-      margin: 16px 0;
-      break-inside: avoid;
-    }
-    .expert-cta-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-    .expert-cta-body { font-size: 11px; opacity: 0.9; line-height: 1.5; }
-    .expert-cta-contact { font-size: 12px; font-weight: 700; margin-top: 6px; color: #fcd34d; }
-
-    .footer {
-      margin-top: 20px;
-      padding-top: 14px;
-      border-top: 2px solid #004225;
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 16px;
-    }
-    .footer-sig { display: flex; align-items: center; gap: 10px; }
-    .footer-dr-img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid #004225; }
-    .footer-name { font-size: 15px; font-weight: 800; color: #004225; font-style: italic; }
-    .footer-desig { font-size: 10px; color: #6b7280; margin-top: 2px; }
-    .footer-brand { text-align: right; }
-    .footer-brand-name { font-size: 13px; font-weight: 800; color: #004225; }
-    .footer-brand-tagline { font-size: 10px; color: #9E6B3D; }
-    .footer-date { font-size: 10px; color: #9b9b9b; margin-top: 2px; }
-
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  </style>
-</head>
-<body>
-
-<!-- ══════════════ PAGE 1 ══════════════ -->
-<div class="page">
-  ${sharedHeader}
-
-  <!-- HEALTH SEEKER DETAILS -->
-  <div class="section-title">Health Seeker Details</div>
-  <div class="seeker-row">
-    <div class="seeker-field">
-      <span class="seeker-label">Name</span>
-      <span class="seeker-value">${userName || "—"}</span>
-    </div>
-    <div class="seeker-field">
-      <span class="seeker-label">Age</span>
-      <span class="seeker-value">${userAge || "—"}</span>
-    </div>
-    <div class="seeker-field">
-      <span class="seeker-label">Gender</span>
-      <span class="seeker-value">${userGender || "—"}</span>
-    </div>
-    <div class="seeker-field">
-      <span class="seeker-label">Assessment Date</span>
-      <span class="seeker-value">${dateStr}</span>
-    </div>
-  </div>
-
-  <!-- OVERALL SCORE -->
-  <div class="section-title">Overall Health Readiness Score</div>
-  <div class="score-box">
-    <div>
-      <span class="score-num">${result.totalScore}</span>
-      <span class="score-max">/160</span>
-    </div>
-    <div class="score-zone" style="color: ${zoneColor};">${zoneLabel}</div>
-  </div>
-
-  <!-- SECTION SUMMARY TABLE -->
-  <div class="section-title">Section-wise Summary</div>
-  <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
-    <thead>
-      <tr style="background: #f9fafb;">
-        <th style="padding: 8px; text-align: left; font-size: 11px; color: #6b7280; border: 1px solid #e5e7eb;">Section</th>
-        <th style="padding: 8px; text-align: center; font-size: 11px; color: #6b7280; border: 1px solid #e5e7eb;">Score</th>
-        <th style="padding: 8px; text-align: center; font-size: 11px; color: #6b7280; border: 1px solid #e5e7eb;">Zone</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${sectionTableRows}
-    </tbody>
-  </table>
-
-  <!-- WHAT YOU ARE DOING WELL -->
-  <div class="section-title" style="break-before: avoid;">✅ What You Are Doing Well</div>
-  <div style="break-inside: avoid;">
-  ${buildDoingWellHtml()}
-  </div>
-</div>
-
-<!-- ══════════════ PAGE 2 ══════════════ -->
-<div style="page-break-before: always;" class="page">
-  ${sharedHeader}
-
-  <!-- AREAS TO FOCUS ON -->
-  <div class="section-title" style="margin-top: 0; margin-bottom: 10px;">🔴 Areas to Focus On</div>
-  ${[0, 1, 2, 3].map((i) => buildFocusHtml(i)).join("")}
-
-  <!-- EXPERT CTA -->
-  <div class="expert-cta">
-    <div class="expert-cta-title">🎯 1-on-1 Expert Consultation with Dr. Suman Lal</div>
-    <div class="expert-cta-body">Apne Readiness Gap ko samajhne ke liye Dr. Suman Lal se 1-on-1 consultation book karein. Aapki assessment report ke basis par personalized guidance milegi jo aapki journey ko accelerate karegi.</div>
-    <div class="expert-cta-contact">📱 WhatsApp / Call: +91 9199434365</div>
-  </div>
-
-  ${sharedFooter}
-</div>
-
-</body>
-</html>`;
-
-    const printWindow = window.open("", "_blank", "width=900,height=700");
-    if (!printWindow) {
-      setIsGeneratingPDF(false);
-      alert("Please allow popups to generate the PDF report.");
-      return;
-    }
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-
-    // Wait for all images to load before printing
-    const triggerPrint = () => {
-      setIsGeneratingPDF(false);
-      printWindow.focus();
-      printWindow.print();
-      const score = result.totalScore;
-      const waMsg = encodeURIComponent(
-        `Namaste, mujhe mera ABL PULSE Health Report share karna hai. Mera Score: ${score}/160`,
-      );
-      window.open(`https://wa.me/919199434365?text=${waMsg}`, "_blank");
-    };
-
-    printWindow.onload = () => {
-      const imgs = printWindow.document.querySelectorAll("img");
-      if (imgs.length === 0) {
-        setTimeout(triggerPrint, 500);
-        return;
-      }
-      let loaded = 0;
-      const onDone = () => {
-        loaded++;
-        if (loaded >= imgs.length) setTimeout(triggerPrint, 400);
-      };
-      for (const img of Array.from(imgs)) {
-        if (img.complete) {
-          onDone();
+        if (naItems.length > 0) {
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7.5);
+          doc.setTextColor(red);
+          doc.text("Needs Attention:", ml + 3, y);
+          y += 5;
+          for (const item of naItems) {
+            checkPage(8);
+            const text =
+              lang === "en" ? item.suggestion.en : item.suggestion.hi;
+            const lines = doc.splitTextToSize(`• ${text}`, contentW - 6);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8);
+            doc.setTextColor("#374151");
+            doc.text(lines, ml + 3, y);
+            y += lines.length * 4 + 1;
+          }
         } else {
-          img.addEventListener("load", onDone);
-          img.addEventListener("error", onDone);
+          doc.setFont("helvetica", "italic");
+          doc.setFontSize(8);
+          doc.setTextColor(gray);
+          doc.text("All habits on track – no attention needed.", ml + 3, y);
+          y += 6;
+        }
+
+        // Card border
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor("#e5e7eb");
+        doc.setLineWidth(0.3);
+        doc.roundedRect(ml, cardStartY, contentW, y - cardStartY + 2, 2, 2);
+        y += 5;
+      }
+
+      // Expert CTA
+      checkPage(28);
+      doc.setFillColor(0, 66, 37);
+      doc.roundedRect(ml, y, contentW, 26, 3, 3, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor("#ffffff");
+      doc.text("1-on-1 Expert Consultation with Dr. Suman Lal", ml + 5, y + 7);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor("rgba(255,255,255,0.85)");
+      const ctaLines = doc.splitTextToSize(
+        "Apne Readiness Gap ko samajhne ke liye Dr. Suman Lal se 1-on-1 consultation book karein. Aapki assessment report ke basis par personalized guidance milegi.",
+        contentW - 10,
+      );
+      doc.text(ctaLines, ml + 5, y + 13);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor("#fcd34d");
+      doc.text("WhatsApp / Call: +91 9199434365", ml + 5, y + 23);
+      y += 32;
+
+      // Footer
+      const footerY = pageH - mb - 14;
+      doc.setDrawColor(green);
+      doc.setLineWidth(0.6);
+      doc.line(ml, footerY, ml + contentW, footerY);
+
+      // Dr. Suman photo
+      if (drSumanDataURL) {
+        try {
+          doc.addImage(drSumanDataURL, "PNG", ml, footerY + 3, 12, 12);
+        } catch {
+          /* skip */
         }
       }
-      // Safety fallback in case events don't fire
-      setTimeout(triggerPrint, 2500);
-    };
+      doc.setFont("helvetica", "bolditalic");
+      doc.setFontSize(10);
+      doc.setTextColor(green);
+      doc.text("Dr. Suman Lal", ml + 15, footerY + 7);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(gray);
+      doc.text(
+        "Naturopathy Practitioner | Doctorate in Psychology",
+        ml + 15,
+        footerY + 11,
+      );
+      doc.setFontSize(7);
+      doc.setTextColor("#9b9b9b");
+      doc.text("Authorized Signature", ml + 15, footerY + 14.5);
+
+      // Right side
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(green);
+      doc.text("ABL PULSE", ml + contentW, footerY + 7, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(gold);
+      doc.text("Ayurved Banaye Life", ml + contentW, footerY + 11, {
+        align: "right",
+      });
+      doc.setFontSize(7);
+      doc.setTextColor("#9b9b9b");
+      doc.text(`Generated: ${dateStr}`, ml + contentW, footerY + 14.5, {
+        align: "right",
+      });
+
+      // Save directly
+      doc.save("ABL-PULSE-Report.pdf");
+    } catch (err) {
+      console.error("PDF generation error:", err);
+      alert("PDF generation failed. Please try again.");
+    }
+
+    setIsGeneratingPDF(false);
   };
 
   return (
     <div
       data-ocid="result.page"
-      className="fixed inset-0 z-[900] flex flex-col overflow-y-auto"
+      className="fixed inset-0 z-[900] flex flex-col overflow-hidden"
       style={{ background: "oklch(var(--abl-bg))" }}
     >
       {/* Decorative background */}
@@ -2965,7 +3211,7 @@ function ResultScreen({
       </div>
 
       {/* ── Main scrollable content ── */}
-      <div className="relative z-10 flex-1 py-6 px-4 pb-24">
+      <div className="relative z-10 flex-1 overflow-y-auto py-5 px-4 pb-24">
         <div className="max-w-lg mx-auto flex flex-col gap-6">
           {/* Header pill */}
           <div className="flex justify-center">
@@ -3212,11 +3458,14 @@ type AssessmentFormState = {
 
 type AssessmentErrors = Partial<Record<keyof AssessmentFormState, string>>;
 
+const DRAFT_KEY = "ablpulse_assessment_draft";
+
 function AssessmentPage({ onBack }: { onBack: () => void }) {
   const [lang, setLang] = useState<Lang>("en");
   const [step, setStep] = useState<"form" | "questionnaire" | "result">("form");
   const [scoreResult, setScoreResult] = useState<ScoreResult | null>(null);
   const [savedAnswers, setSavedAnswers] = useState<Record<string, number>>({});
+  const [showResumeBanner, setShowResumeBanner] = useState(false);
   const { actor } = useActor();
   const [form, setForm] = useState<AssessmentFormState>({
     name: "",
@@ -3232,6 +3481,62 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
     email: "",
   });
   const [errors, setErrors] = useState<AssessmentErrors>({});
+
+  // Load draft from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw) as {
+          form: AssessmentFormState;
+          lang: Lang;
+          savedAt: string;
+        };
+        if (draft.form?.name || draft.form?.whatsapp) {
+          setShowResumeBanner(true);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Auto-save form to localStorage whenever form changes
+  useEffect(() => {
+    if (form.name || form.whatsapp) {
+      try {
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({ form, lang, savedAt: new Date().toISOString() }),
+        );
+      } catch {
+        // ignore
+      }
+    }
+  }, [form, lang]);
+
+  const resumeDraft = () => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw) as {
+          form: AssessmentFormState;
+          lang: Lang;
+        };
+        if (draft.form) setForm(draft.form);
+        if (draft.lang) setLang(draft.lang);
+      }
+    } catch {
+      // ignore
+    }
+    setShowResumeBanner(false);
+  };
+
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    localStorage.removeItem(ANSWERS_DRAFT_KEY);
+    setShowResumeBanner(false);
+  };
 
   const c = assessmentContent[lang];
 
@@ -3346,6 +3651,9 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
           const result = calculateScore(answers);
           setScoreResult(result);
           setSavedAnswers(answers);
+          // Clear both drafts on completion
+          localStorage.removeItem(DRAFT_KEY);
+          localStorage.removeItem(ANSWERS_DRAFT_KEY);
           setStep("result");
           // Fire-and-forget backend save
           const answersArray = Array.from({ length: 40 }, (_, i) => {
@@ -3399,7 +3707,7 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
   return (
     <div
       data-ocid="assessment.page"
-      className="fixed inset-0 z-[900] flex flex-col overflow-y-auto"
+      className="fixed inset-0 z-[900] flex flex-col overflow-hidden"
       style={{ background: "oklch(var(--abl-bg))" }}
     >
       {/* Decorative background */}
@@ -3475,7 +3783,60 @@ function AssessmentPage({ onBack }: { onBack: () => void }) {
       </div>
 
       {/* ── Scrollable Content ── */}
-      <div className="relative z-10 flex-1 pb-16">
+      <div className="relative z-10 flex-1 overflow-y-auto pb-16">
+        {/* ── Resume Draft Banner ── */}
+        {showResumeBanner && (
+          <div
+            className="mx-4 mt-3 rounded-xl px-4 py-3 flex items-center justify-between gap-3"
+            style={{
+              background: "oklch(var(--abl-gold) / 0.1)",
+              border: "1.5px solid oklch(var(--abl-gold) / 0.4)",
+            }}
+          >
+            <div className="flex-1 min-w-0">
+              <p
+                className="text-xs font-bold"
+                style={{ color: "oklch(var(--abl-gold))" }}
+              >
+                {lang === "en" ? "Draft Saved" : "ड्राफ्ट सेव है"}
+              </p>
+              <p
+                className="text-xs truncate"
+                style={{ color: "oklch(var(--abl-green-mid))" }}
+              >
+                {lang === "en"
+                  ? "Continue your previous assessment?"
+                  : "पिछला आकलन जारी रखें?"}
+              </p>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={clearDraft}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg"
+                style={{
+                  background: "oklch(var(--abl-bg))",
+                  color: "oklch(var(--abl-border))",
+                  border: "1px solid oklch(var(--abl-border) / 0.5)",
+                }}
+              >
+                {lang === "en" ? "Clear" : "हटाएं"}
+              </button>
+              <button
+                type="button"
+                onClick={resumeDraft}
+                className="text-xs font-bold px-2.5 py-1.5 rounded-lg"
+                style={{
+                  background: "oklch(var(--abl-gold))",
+                  color: "white",
+                }}
+              >
+                {lang === "en" ? "Resume" : "जारी करें"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Section 1: Intro ── */}
         <section className="max-w-2xl mx-auto px-4 pt-8 pb-6 text-center flex flex-col items-center gap-5">
           <LogoImage
@@ -3874,11 +4235,13 @@ function Navbar({
   setMobileMenuOpen,
   onAssessment,
   onLogin,
+  onServices,
 }: {
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (v: boolean) => void;
   onAssessment: () => void;
   onLogin: () => void;
+  onServices: () => void;
 }) {
   const [scrolled, setScrolled] = useState(false);
 
@@ -3889,11 +4252,26 @@ function Navbar({
   }, []);
 
   const links = [
-    { label: "Home", id: "home", isAssessment: false },
-    { label: "Assessment", id: "assessment", isAssessment: true },
-    { label: "Services", id: "framework", isAssessment: false },
-    { label: "About Us", id: "trust", isAssessment: false },
-    { label: "Contact Us", id: "footer", isAssessment: false },
+    { label: "Home", id: "home", isAssessment: false, isServices: false },
+    {
+      label: "Assessment",
+      id: "assessment",
+      isAssessment: true,
+      isServices: false,
+    },
+    {
+      label: "Services",
+      id: "framework",
+      isAssessment: false,
+      isServices: true,
+    },
+    { label: "About Us", id: "trust", isAssessment: false, isServices: false },
+    {
+      label: "Contact Us",
+      id: "footer",
+      isAssessment: false,
+      isServices: false,
+    },
   ];
 
   return (
@@ -3937,6 +4315,8 @@ function Navbar({
               onClick={() => {
                 if (l.isAssessment) {
                   onAssessment();
+                } else if (l.isServices) {
+                  onServices();
                 } else {
                   scrollToSection(l.id);
                 }
@@ -4017,6 +4397,8 @@ function Navbar({
                   setMobileMenuOpen(false);
                   if (l.isAssessment) {
                     onAssessment();
+                  } else if (l.isServices) {
+                    onServices();
                   } else {
                     scrollToSection(l.id);
                   }
@@ -4964,6 +5346,282 @@ function Footer({
 }
 
 /* ─────────────────────────────────────────────
+   SERVICES PAGE
+───────────────────────────────────────────── */
+function ServicesPage({
+  onAssessment,
+  onBack,
+}: {
+  onAssessment: () => void;
+  onBack: () => void;
+}) {
+  const WHATSAPP_LINK = `https://wa.me/919199434365?text=${encodeURIComponent("Namaste, I would like to book a One-on-One Report Reading session.")}`;
+
+  const services = [
+    {
+      title: "Health Readiness Score",
+      badge: "Live",
+      badgeLive: true,
+      description:
+        "Quick 5–7 minute assessment to identify your lifestyle gap.",
+      cta: "Start Free Assessment",
+      ctaAction: "assessment" as const,
+    },
+    {
+      title: "One-on-One Report Reading Support",
+      badge: "Live",
+      badgeLive: true,
+      description:
+        "15–20 minute expert session to explain your readiness gap and suggest your next step.",
+      cta: "Book Clarity Session",
+      ctaAction: "whatsapp" as const,
+    },
+    {
+      title: "Awareness Webinar",
+      badge: "Coming Soon",
+      badgeLive: false,
+      description:
+        "Understand lifestyle gaps and how small corrections create big impact.",
+      cta: "Coming Soon",
+      ctaAction: "coming_soon" as const,
+    },
+    {
+      title: "Structured Health Programs",
+      badge: "Coming Soon",
+      badgeLive: false,
+      description:
+        "Guided weekly improvement program for long-term lifestyle balance.",
+      cta: "Coming Soon",
+      ctaAction: "coming_soon" as const,
+    },
+    {
+      title: "7-Day Health Engagement Camp",
+      badge: "Coming Soon",
+      badgeLive: false,
+      description:
+        "Community-based health activation and habit reset real experience.",
+      cta: "Coming Soon",
+      ctaAction: "coming_soon" as const,
+    },
+  ] as const;
+
+  return (
+    <div
+      data-ocid="services.page"
+      className="fixed inset-0 z-[900] flex flex-col overflow-hidden"
+      style={{ background: "oklch(var(--abl-bg))" }}
+    >
+      {/* Decorative background */}
+      <div
+        className="absolute inset-0 pointer-events-none overflow-hidden"
+        aria-hidden="true"
+      >
+        <LeafDecor className="top-0 right-0" size={200} opacity={0.05} />
+        <LeafDecor
+          className="bottom-40 left-0 rotate-180"
+          size={160}
+          opacity={0.04}
+        />
+      </div>
+
+      {/* Sticky Top Bar */}
+      <div
+        className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 flex-shrink-0"
+        style={{
+          background: "white",
+          borderBottom: "1px solid oklch(var(--abl-border))",
+        }}
+      >
+        <button
+          type="button"
+          data-ocid="services.back_button"
+          onClick={onBack}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
+          style={{
+            color: "oklch(var(--abl-green))",
+            background: "oklch(var(--abl-green) / 0.08)",
+            border: "1px solid oklch(var(--abl-green) / 0.2)",
+          }}
+        >
+          <ArrowLeft size={15} />
+          <span className="hidden sm:inline">Back</span>
+        </button>
+        <LogoImage
+          imgClassName="h-8 w-8"
+          textClassName="text-sm"
+          textStyle={{ color: "oklch(var(--abl-green))" }}
+        />
+        <div className="w-[68px]" aria-hidden="true" />
+      </div>
+
+      {/* Scrollable Content */}
+      <div className="relative z-10 flex-1 overflow-y-auto pb-[80px] md:pb-8">
+        <div className="max-w-2xl mx-auto px-4 pt-8 pb-6">
+          {/* Page Heading */}
+          <div className="text-center mb-8">
+            <h1
+              className="font-display font-bold text-2xl sm:text-3xl leading-tight mb-3"
+              style={{ color: "oklch(var(--abl-green))" }}
+            >
+              Our Health Readiness Services
+            </h1>
+            <p
+              className="text-sm sm:text-base leading-relaxed max-w-lg mx-auto"
+              style={{ color: "oklch(var(--abl-green-mid))" }}
+            >
+              Structured lifestyle clarity and guided support to help you
+              understand and improve your health step by step.
+            </p>
+          </div>
+
+          {/* Service Cards */}
+          <div className="flex flex-col gap-4 mb-8">
+            {services.map((service) => (
+              <div
+                key={service.title}
+                className="rounded-2xl p-5 flex flex-col gap-3"
+                style={{
+                  background: "white",
+                  border: `1.5px solid ${service.badgeLive ? "oklch(var(--abl-green) / 0.2)" : "oklch(var(--abl-border) / 0.4)"}`,
+                  boxShadow: service.badgeLive
+                    ? "0 2px 16px oklch(var(--abl-green) / 0.07)"
+                    : "none",
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h2
+                    className="font-display font-bold text-base leading-snug flex-1"
+                    style={{ color: "oklch(var(--abl-green))" }}
+                  >
+                    {service.title}
+                  </h2>
+                  <span
+                    className="flex-shrink-0 text-xs font-bold px-2.5 py-0.5 rounded-full"
+                    style={
+                      service.badgeLive
+                        ? {
+                            background: "oklch(var(--abl-green) / 0.1)",
+                            color: "oklch(var(--abl-green))",
+                            border: "1px solid oklch(var(--abl-green) / 0.3)",
+                          }
+                        : {
+                            background: "oklch(var(--abl-border) / 0.15)",
+                            color: "oklch(var(--abl-border))",
+                            border: "1px solid oklch(var(--abl-border) / 0.4)",
+                          }
+                    }
+                  >
+                    {service.badge}
+                  </span>
+                </div>
+
+                <p
+                  className="text-sm leading-relaxed"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  {service.description}
+                </p>
+
+                {service.ctaAction === "assessment" && (
+                  <button
+                    type="button"
+                    data-ocid="services.start_assessment_button"
+                    onClick={onAssessment}
+                    className="w-full py-3 rounded-xl text-sm font-bold tracking-wide transition-all"
+                    style={{
+                      background: "oklch(var(--abl-green))",
+                      color: "white",
+                      boxShadow: "0 4px 12px oklch(var(--abl-green) / 0.25)",
+                    }}
+                  >
+                    {service.cta}
+                  </button>
+                )}
+
+                {service.ctaAction === "whatsapp" && (
+                  <a
+                    href={WHATSAPP_LINK}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-ocid="services.book_clarity_button"
+                    className="w-full py-3 rounded-xl text-sm font-bold tracking-wide transition-all inline-flex items-center justify-center gap-2"
+                    style={{
+                      background: "#25D366",
+                      color: "white",
+                      boxShadow: "0 4px 12px rgba(37,211,102,0.25)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />
+                    </svg>
+                    {service.cta}
+                  </a>
+                )}
+
+                {service.ctaAction === "coming_soon" && (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full py-3 rounded-xl text-sm font-bold tracking-wide cursor-not-allowed"
+                    style={{
+                      background: "oklch(var(--abl-bg))",
+                      color: "oklch(var(--abl-border))",
+                      border: "1.5px solid oklch(var(--abl-border) / 0.4)",
+                    }}
+                  >
+                    {service.cta}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Bottom CTA Section */}
+          <div
+            className="rounded-3xl p-6 sm:p-8 text-center flex flex-col items-center gap-4"
+            style={{
+              background: "oklch(var(--abl-green))",
+              boxShadow: "0 8px 32px oklch(var(--abl-green) / 0.25)",
+            }}
+          >
+            <h2 className="font-display font-bold text-xl sm:text-2xl leading-tight text-white">
+              Ready to Understand Your Health Gap?
+            </h2>
+            <p
+              className="text-sm leading-relaxed max-w-md"
+              style={{ color: "rgba(255,255,255,0.85)" }}
+            >
+              Start with a simple assessment and get clear guidance on your next
+              small step toward better lifestyle balance.
+            </p>
+            <button
+              type="button"
+              data-ocid="services.bottom_assessment_button"
+              onClick={onAssessment}
+              className="px-8 py-3.5 rounded-2xl text-sm font-bold tracking-wide uppercase transition-all"
+              style={{
+                background: "oklch(var(--abl-gold))",
+                color: "white",
+                boxShadow: "0 4px 16px rgba(158,107,61,0.4)",
+              }}
+            >
+              Start Free Assessment
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
    BOTTOM APP BAR (Mobile)
 ───────────────────────────────────────────── */
 const navItems = [
@@ -5007,31 +5665,44 @@ const navItems = [
 function BottomAppBar({
   activeSection,
   onAssessment,
+  onGoHome,
+  onGoServices,
   currentPage,
 }: {
   activeSection: string;
   onAssessment: () => void;
-  currentPage: "home" | "assessment";
+  onGoHome: () => void;
+  onGoServices: () => void;
+  currentPage: "home" | "assessment" | "services";
 }) {
   return (
     <nav className="bottom-nav md:hidden" aria-label="Mobile navigation">
       <div className="flex items-stretch justify-around h-[60px]">
         {navItems.map((item) => {
           const Icon = item.icon;
-          // When on assessment page, highlight Assessment tab
-          // When on home page, use scroll-based active section (default to "home")
-          const isActive =
-            currentPage === "assessment"
-              ? item.isAssessment
-              : item.id === (activeSection || "home");
+          // Determine active state based on currentPage
+          let isActive = false;
+          if (currentPage === "assessment") {
+            isActive = item.isAssessment;
+          } else if (currentPage === "services") {
+            isActive = item.id === "framework";
+          } else {
+            isActive = item.id === (activeSection || "home");
+          }
           return (
             <button
               type="button"
               key={item.id}
               data-ocid={item.ocid}
               onClick={() => {
-                if (item.isAssessment) {
+                if (item.id === "home") {
+                  // Home always goes to landing page
+                  onGoHome();
+                  scrollToSection("home");
+                } else if (item.isAssessment) {
                   onAssessment();
+                } else if (item.id === "framework") {
+                  onGoServices();
                 } else {
                   scrollToSection(item.id);
                 }
@@ -5155,7 +5826,9 @@ function useActiveSection(ids: string[]) {
 ───────────────────────────────────────────── */
 export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState<"home" | "assessment">("home");
+  const [currentPage, setCurrentPage] = useState<
+    "home" | "assessment" | "services"
+  >("home");
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
 
@@ -5177,6 +5850,11 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
+  const goToServices = () => {
+    setCurrentPage("services");
+    setMobileMenuOpen(false);
+  };
+
   const goHome = () => {
     setCurrentPage("home");
   };
@@ -5193,6 +5871,11 @@ export default function App() {
     >
       {/* Assessment page (full-screen overlay) */}
       {currentPage === "assessment" && <AssessmentPage onBack={goHome} />}
+
+      {/* Services page (full-screen overlay) */}
+      {currentPage === "services" && (
+        <ServicesPage onAssessment={goToAssessment} onBack={goHome} />
+      )}
 
       {/* Admin Dashboard (full-screen overlay) */}
       {showAdminDashboard && (
@@ -5216,6 +5899,7 @@ export default function App() {
         setMobileMenuOpen={setMobileMenuOpen}
         onAssessment={goToAssessment}
         onLogin={openLogin}
+        onServices={goToServices}
       />
 
       {/* Main content — top padding for sticky header */}
@@ -5234,6 +5918,8 @@ export default function App() {
       <BottomAppBar
         activeSection={activeSection}
         onAssessment={goToAssessment}
+        onGoHome={goHome}
+        onGoServices={goToServices}
         currentPage={currentPage}
       />
 

@@ -112,6 +112,7 @@ export interface HealthSeekerRecord {
     category: string;
 }
 export interface backendInterface {
+    deleteSubmission(id: bigint): Promise<boolean>;
     getSubmissionById(id: bigint): Promise<HealthSeekerRecord | null>;
     getSubmissions(): Promise<Array<HealthSeekerRecord>>;
     submitAssessment(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null, answers: Array<bigint>): Promise<bigint>;
@@ -119,6 +120,20 @@ export interface backendInterface {
 import type { HealthSeekerRecord as _HealthSeekerRecord } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async deleteSubmission(arg0: bigint): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteSubmission(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteSubmission(arg0);
+            return result;
+        }
+    }
     async getSubmissionById(arg0: bigint): Promise<HealthSeekerRecord | null> {
         if (this.processError) {
             try {

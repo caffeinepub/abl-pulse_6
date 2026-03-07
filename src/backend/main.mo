@@ -5,8 +5,6 @@ import Array "mo:core/Array";
 import Iter "mo:core/Iter";
 import Runtime "mo:core/Runtime";
 
-
-
 actor {
   type HealthSeekerRecord = {
     id : Nat;
@@ -31,9 +29,12 @@ actor {
     submittedAt : Int;
   };
 
-  var nextId = 1;
+  var nextId : Nat = 1;
+  var submissionsEntries : [(Nat, HealthSeekerRecord)] = [];
 
-  let submissions = Map.empty<Nat, HealthSeekerRecord>();
+  let submissions : Map.Map<Nat, HealthSeekerRecord> = Map.fromIter<Nat, HealthSeekerRecord>(
+    submissionsEntries.vals(),
+  );
 
   func validateAnswers(answers : [Nat]) {
     if (answers.size() != 40) {
@@ -139,5 +140,22 @@ actor {
 
   public query ({ caller }) func getSubmissionById(id : Nat) : async ?HealthSeekerRecord {
     submissions.get(id);
+  };
+
+  public shared ({ caller }) func deleteSubmission(id : Nat) : async Bool {
+    if (submissions.containsKey(id)) {
+      submissions.remove(id);
+      true;
+    } else {
+      false;
+    };
+  };
+
+  system func preupgrade() {
+    submissionsEntries := submissions.entries().toArray();
+  };
+
+  system func postupgrade() {
+    submissionsEntries := [];
   };
 };

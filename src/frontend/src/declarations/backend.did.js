@@ -32,6 +32,7 @@ export const HealthSeekerRecord = IDL.Record({
 });
 
 export const idlService = IDL.Service({
+  'deleteSubmission' : IDL.Func([IDL.Nat], [IDL.Bool], []),
   'getSubmissionById' : IDL.Func(
       [IDL.Nat],
       [IDL.Opt(HealthSeekerRecord)],
@@ -85,6 +86,7 @@ export const idlFactory = ({ IDL }) => {
   });
   
   return IDL.Service({
+    'deleteSubmission' : IDL.Func([IDL.Nat], [IDL.Bool], []),
     'getSubmissionById' : IDL.Func(
         [IDL.Nat],
         [IDL.Opt(HealthSeekerRecord)],

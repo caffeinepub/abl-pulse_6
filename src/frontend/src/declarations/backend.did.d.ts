@@ -33,6 +33,7 @@ export interface HealthSeekerRecord {
   'category' : string,
 }
 export interface _SERVICE {
+  'deleteSubmission' : ActorMethod<[bigint], boolean>,
   'getSubmissionById' : ActorMethod<[bigint], [] | [HealthSeekerRecord]>,
   'getSubmissions' : ActorMethod<[], Array<HealthSeekerRecord>>,
   'submitAssessment' : ActorMethod<

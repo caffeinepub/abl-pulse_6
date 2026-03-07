@@ -30,6 +30,7 @@ export interface HealthSeekerRecord {
     category: string;
 }
 export interface backendInterface {
+    deleteSubmission(id: bigint): Promise<boolean>;
     getSubmissionById(id: bigint): Promise<HealthSeekerRecord | null>;
     getSubmissions(): Promise<Array<HealthSeekerRecord>>;
     submitAssessment(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null, answers: Array<bigint>): Promise<bigint>;
