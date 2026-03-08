@@ -222,8 +222,8 @@ function getZoneColors(category: string): {
 }
 
 function getAdminSectionZone(score: number): string {
-  if (score <= 13) return "needs_attention";
-  if (score <= 26) return "building_zone";
+  if (score <= 20) return "needs_attention";
+  if (score <= 30) return "building_zone";
   return "strong_area";
 }
 
@@ -719,8 +719,8 @@ async function generateAdminPDF(record: HealthSeekerRecord): Promise<void> {
   ] as const;
 
   const getSectionZoneLabelColor = (score: number) => {
-    if (score <= 13) return { label: "Needs Attention", color: "#DC2626" };
-    if (score <= 26) return { label: "Building Zone", color: "#D97706" };
+    if (score <= 20) return { label: "Needs Attention", color: "#DC2626" };
+    if (score <= 30) return { label: "Building Zone", color: "#D97706" };
     return { label: "Strong Area", color: "#004225" };
   };
 
@@ -3347,8 +3347,8 @@ function GaugeMeter({
 type ZoneKey = "needs_attention" | "building_zone" | "strong_area";
 
 function getSectionZone(score: number): ZoneKey {
-  if (score <= 13) return "needs_attention";
-  if (score <= 26) return "building_zone";
+  if (score <= 20) return "needs_attention";
+  if (score <= 30) return "building_zone";
   return "strong_area";
 }
 
@@ -3632,8 +3632,8 @@ function ResultScreen({
     ] as const;
 
     const getSectionZoneLabelColor = (score: number) => {
-      if (score <= 13) return { label: "Needs Attention", color: "#DC2626" };
-      if (score <= 26) return { label: "Building Zone", color: "#D97706" };
+      if (score <= 20) return { label: "Needs Attention", color: "#DC2626" };
+      if (score <= 30) return { label: "Building Zone", color: "#D97706" };
       return { label: "Strong Area", color: "#004225" };
     };
 

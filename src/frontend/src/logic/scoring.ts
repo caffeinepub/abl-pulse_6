@@ -55,7 +55,7 @@ export function calculateScore(answers: AnswerMap): ScoreResult {
   let categoryEmoji: string;
   let summaryMessage: string;
 
-  if (totalScore <= 56) {
+  if (totalScore <= 65) {
     category = "needs_attention";
     categoryLabel = "Needs Attention";
     categoryEmoji = "🔴";
