@@ -30,8 +30,20 @@ actor {
     submittedAt : Int;
   };
 
-  var nextId = 1;
-  let submissions = Map.empty<Nat, HealthSeekerRecord>();
+  stable var nextId : Nat = 1;
+  stable var submissionsStable : [(Nat, HealthSeekerRecord)] = [];
+
+  var submissions = Map.empty<Nat, HealthSeekerRecord>();
+
+  system func preupgrade() {
+    submissionsStable := submissions.entries().toArray();
+  };
+
+  system func postupgrade() {
+    for ((k, v) in submissionsStable.vals()) {
+      submissions.add(k, v);
+    };
+  };
 
   func validateAnswers(answers : [Nat]) {
     if (answers.size() != 40) {
@@ -75,7 +87,7 @@ actor {
   };
 
   func categorizeScore(score : Nat) : Text {
-    if (score <= 56) {
+    if (score <= 65) {
       "needs_attention";
     } else if (score <= 116) {
       "building_zone";

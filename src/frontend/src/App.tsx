@@ -14,6 +14,7 @@ import {
   Facebook,
   Heart,
   Home,
+  Image,
   Instagram,
   Leaf,
   Loader2,
@@ -1119,7 +1120,7 @@ function AdminDashboard({
 }: { onLogout: () => void; role: "admin" | "hc" }) {
   const { actor } = useActor();
   const [activeTab, setActiveTab] = useState<
-    "pipeline" | "contacts" | "analytics" | "settings"
+    "pipeline" | "contacts" | "analytics" | "brand_assets" | "settings"
   >("pipeline");
   const [records, setRecords] = useState<HealthSeekerRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1291,6 +1292,12 @@ function AdminDashboard({
       label: "Analytics",
       Icon: ClipboardList,
       ocid: "admin.sidebar.analytics_link",
+    },
+    {
+      id: "brand_assets" as const,
+      label: "Brand Assets",
+      Icon: Image,
+      ocid: "admin.sidebar.brand_assets_link",
     },
     {
       id: "settings" as const,
@@ -2145,6 +2152,111 @@ function AdminDashboard({
                 <X size={16} />
                 Logout
               </button>
+            </div>
+          )}
+
+          {/* ── Brand Assets Tab ── */}
+          {!loading && !error && activeTab === "brand_assets" && (
+            <div
+              data-ocid="admin.brand_assets_section"
+              className="p-4 flex flex-col gap-4"
+            >
+              <div>
+                <p
+                  className="text-base font-bold mb-1"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  Brand Assets
+                </p>
+                <p
+                  className="text-xs"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Read-only preview of all brand files used in the app.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                {[
+                  {
+                    file: "ABL-Pulse-Logo-1.png",
+                    label: "App Logo",
+                    usedIn: "Header, PDF Report",
+                    path: "/assets/uploads/ABL-Pulse-Logo-1.png",
+                  },
+                  {
+                    file: "App-sample-4.png",
+                    label: "Hero Section Image",
+                    usedIn: "Landing Page Hero",
+                    path: "/assets/uploads/App-sample-4.png",
+                  },
+                  {
+                    file: "Dr-Suman-Lal-2.png",
+                    label: "Dr. Suman Lal Photo",
+                    usedIn: "About Us Page",
+                    path: "/assets/uploads/Dr-Suman-Lal-2.png",
+                  },
+                  {
+                    file: "ABL-Pulse-Branding-3.png",
+                    label: "Branding Kit",
+                    usedIn: "Reference",
+                    path: "/assets/uploads/ABL-Pulse-Branding-3.png",
+                  },
+                ].map((asset) => (
+                  <div
+                    key={asset.file}
+                    data-ocid="admin.brand_assets.item"
+                    className="rounded-xl overflow-hidden"
+                    style={{
+                      border: "1.5px solid oklch(var(--abl-border))",
+                      background: "oklch(var(--abl-bg))",
+                    }}
+                  >
+                    <div
+                      className="w-full flex items-center justify-center"
+                      style={{
+                        background: "oklch(var(--abl-card))",
+                        minHeight: "80px",
+                        maxHeight: "120px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <img
+                        src={asset.path}
+                        alt={asset.label}
+                        style={{
+                          maxHeight: "110px",
+                          maxWidth: "100%",
+                          objectFit: "contain",
+                          padding: "8px",
+                        }}
+                      />
+                    </div>
+                    <div className="px-3 py-2.5 flex flex-col gap-0.5">
+                      <p
+                        className="text-sm font-bold"
+                        style={{ color: "oklch(var(--abl-green))" }}
+                      >
+                        {asset.label}
+                      </p>
+                      <p
+                        className="text-xs"
+                        style={{ color: "oklch(var(--abl-green-mid))" }}
+                      >
+                        Used in: {asset.usedIn}
+                      </p>
+                      <p
+                        className="text-xs font-mono mt-0.5"
+                        style={{
+                          color: "oklch(var(--abl-gold))",
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {asset.file}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -3176,9 +3288,10 @@ function GaugeMeter({
   // The arc spans 180 degrees (π radians), flat at bottom
 
   // Zone thresholds as fraction of arc
-  // needs_attention: 0–33.125%, building_zone: 33.125–66.25%, strong_area: 66.25–100%
-  const z1 = 0.33125;
-  const z2 = 0.6625;
+  // needs_attention: 0–65 (40.625%), building_zone: 66–116 (72.5%), strong_area: 117–160
+  // Zone thresholds: dynamic based on max (40 for section, 160 for total)
+  const z1 = max === 40 ? 20 / 40 : 65 / 160;
+  const z2 = max === 40 ? 30 / 40 : 116 / 160;
 
   // Convert polar angle (0=left, 180=right on bottom semicircle) to SVG path
   // Angle 0 = leftmost point, Angle 180 = rightmost point
@@ -5516,7 +5629,7 @@ function HeroSection({ onAssessment }: { onAssessment: () => void }) {
 
         {/* H1 */}
         <h1
-          className="reveal reveal-delay-1 font-display font-bold text-3xl sm:text-4xl md:text-5xl lg:text-6xl leading-tight tracking-tight mb-4"
+          className="reveal reveal-delay-1 font-display font-bold text-3xl sm:text-4xl md:text-5xl lg:text-6xl leading-tight tracking-tight mb-4 tracking-wide sm:tracking-tight"
           style={{ color: "oklch(var(--abl-green))" }}
         >
           Know Your{" "}
@@ -5528,23 +5641,26 @@ function HeroSection({ onAssessment }: { onAssessment: () => void }) {
 
         {/* H2 */}
         <p
-          className="reveal reveal-delay-2 text-base sm:text-lg md:text-xl leading-relaxed mb-8 max-w-xl mx-auto"
+          className="reveal reveal-delay-2 text-base sm:text-lg md:text-xl leading-relaxed mb-8 max-w-xl mx-auto whitespace-nowrap sm:whitespace-normal overflow-hidden text-ellipsis"
           style={{ color: "oklch(var(--abl-green-mid))" }}
         >
           Discover the small daily habits affecting your health.
         </p>
 
         {/* Trust indicators */}
-        <div className="reveal reveal-delay-3 flex flex-wrap items-center justify-center gap-4 mb-8">
+        <div className="reveal reveal-delay-3 flex flex-nowrap sm:flex-wrap items-center justify-center gap-3 sm:gap-4 mb-8 overflow-x-auto sm:overflow-visible">
           {["Free Assessment", "Takes 5 Minutes", "40+ Years Expertise"].map(
             (t) => (
-              <div key={t} className="flex items-center gap-1.5">
+              <div
+                key={t}
+                className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0"
+              >
                 <CheckCircle2
-                  size={14}
+                  size={13}
                   style={{ color: "oklch(var(--abl-green))" }}
                 />
                 <span
-                  className="text-xs font-medium"
+                  className="text-xs font-medium whitespace-nowrap"
                   style={{ color: "oklch(var(--abl-green-mid))" }}
                 >
                   {t}
@@ -5560,15 +5676,15 @@ function HeroSection({ onAssessment }: { onAssessment: () => void }) {
             type="button"
             data-ocid="hero.primary_button"
             onClick={onAssessment}
-            className="btn-gold w-full sm:w-auto px-8 py-4 rounded-2xl text-sm sm:text-base font-bold tracking-wide shadow-gold uppercase inline-flex items-center justify-center gap-2"
+            className="btn-gold w-full sm:w-auto px-6 py-3 sm:px-8 sm:py-4 rounded-2xl text-sm sm:text-base font-bold tracking-wide shadow-gold uppercase inline-flex items-center justify-center gap-2"
           >
-            <span>Get Your Health Readiness Score (FREE)</span>
+            <span>Get Your Health Readiness Score</span>
             <ChevronRight size={16} />
           </button>
         </div>
 
-        {/* Heartbeat decoration */}
-        <div className="mt-12 flex justify-center">
+        {/* Heartbeat decoration — desktop only */}
+        <div className="hidden sm:flex mt-12 justify-center">
           <svg
             width="200"
             height="40"

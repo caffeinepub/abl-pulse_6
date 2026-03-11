@@ -108,6 +108,13 @@
     );
   }
 
+  /* Mobile-only: pure Isabgol White background for landing page */
+  @media (max-width: 767px) {
+    .hero-gradient {
+      background: #FAF7F2;
+    }
+  }
+
   /* Organic leaf decoration */
   .leaf-accent {
     position: absolute;
