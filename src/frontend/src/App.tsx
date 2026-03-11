@@ -1,4 +1,8 @@
-import { jsPDF } from "jspdf";
+// jsPDF loaded via CDN (see index.html)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const window: Window & { jspdf: any };
+const jsPDF =
+  typeof window !== "undefined" && window.jspdf ? window.jspdf.jsPDF : null;
 import {
   Activity,
   ArrowLeft,
@@ -35,7 +39,10 @@ import {
   useRef,
   useState,
 } from "react";
-import type { HealthSeekerRecord } from "./backend.d";
+import type {
+  backendInterface as BackendFullInterface,
+  HealthSeekerRecord,
+} from "./backend.d";
 
 /* ─────────────────────────────────────────────
    Scroll utility
@@ -1122,6 +1129,15 @@ function AdminDashboard({
   const [activeTab, setActiveTab] = useState<
     "pipeline" | "contacts" | "analytics" | "brand_assets" | "settings"
   >("pipeline");
+
+  // HC role: redirect away from admin-only tabs
+  const safeSetActiveTab = (tab: typeof activeTab) => {
+    if (role === "hc" && (tab === "analytics" || tab === "settings")) {
+      setActiveTab("pipeline");
+    } else {
+      setActiveTab(tab);
+    }
+  };
   const [records, setRecords] = useState<HealthSeekerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1137,6 +1153,7 @@ function AdminDashboard({
   // Auto-retry state for backend restarting
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   // Prevent body scroll
   useEffect(() => {
@@ -1165,19 +1182,29 @@ function AdminDashboard({
       setRecords(sorted);
       // Reset retry count on success
       retryCountRef.current = 0;
+      setIsConnecting(false);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      const isRestarting = msg.includes("stopped") || msg.includes("IC0508");
+      const isRestarting =
+        msg.includes("stopped") ||
+        msg.includes("IC0508") ||
+        msg.includes("canister") ||
+        msg.includes("replica");
       if (isRestarting) {
-        setError("Backend is restarting. Please wait a moment and try again.");
+        setIsConnecting(true);
+        setError("");
         // Auto-retry up to 10 times, every 3 seconds
         if (retryCountRef.current < 10) {
           retryCountRef.current += 1;
           retryTimerRef.current = setTimeout(() => {
             fetchRecords();
           }, 3000);
+        } else {
+          setIsConnecting(false);
+          setError("Unable to connect to server. Please refresh the page.");
         }
       } else {
+        setIsConnecting(false);
         setError("Failed to load records. Please try again.");
       }
       console.error(e);
@@ -1365,50 +1392,62 @@ function AdminDashboard({
         >
           {/* Desktop sidebar: icon + label; mobile: icon only */}
           <div className="md:hidden flex flex-col gap-1 px-1.5">
-            {sidebarItems.map(({ id, Icon, ocid }) => {
-              const isActive = activeTab === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  data-ocid={ocid}
-                  onClick={() => setActiveTab(id)}
-                  className="flex items-center justify-center w-full h-11 rounded-xl transition-all"
-                  style={{
-                    background: isActive
-                      ? "oklch(var(--abl-green))"
-                      : "transparent",
-                    color: isActive ? "white" : "oklch(var(--abl-green-mid))",
-                  }}
-                  title={id.charAt(0).toUpperCase() + id.slice(1)}
-                >
-                  <Icon size={18} />
-                </button>
-              );
-            })}
+            {sidebarItems
+              .filter(
+                (item) =>
+                  role === "admin" ||
+                  !["analytics", "settings"].includes(item.id),
+              )
+              .map(({ id, Icon, ocid }) => {
+                const isActive = activeTab === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    data-ocid={ocid}
+                    onClick={() => safeSetActiveTab(id)}
+                    className="flex items-center justify-center w-full h-11 rounded-xl transition-all"
+                    style={{
+                      background: isActive
+                        ? "oklch(var(--abl-green))"
+                        : "transparent",
+                      color: isActive ? "white" : "oklch(var(--abl-green-mid))",
+                    }}
+                    title={id.charAt(0).toUpperCase() + id.slice(1)}
+                  >
+                    <Icon size={18} />
+                  </button>
+                );
+              })}
           </div>
           <div className="hidden md:flex flex-col gap-1 px-2">
-            {sidebarItems.map(({ id, label, Icon, ocid }) => {
-              const isActive = activeTab === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  data-ocid={ocid}
-                  onClick={() => setActiveTab(id)}
-                  className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap"
-                  style={{
-                    background: isActive
-                      ? "oklch(var(--abl-green))"
-                      : "transparent",
-                    color: isActive ? "white" : "oklch(var(--abl-green-mid))",
-                  }}
-                >
-                  <Icon size={16} />
-                  {label}
-                </button>
-              );
-            })}
+            {sidebarItems
+              .filter(
+                (item) =>
+                  role === "admin" ||
+                  !["analytics", "settings"].includes(item.id),
+              )
+              .map(({ id, label, Icon, ocid }) => {
+                const isActive = activeTab === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    data-ocid={ocid}
+                    onClick={() => safeSetActiveTab(id)}
+                    className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap"
+                    style={{
+                      background: isActive
+                        ? "oklch(var(--abl-green))"
+                        : "transparent",
+                      color: isActive ? "white" : "oklch(var(--abl-green-mid))",
+                    }}
+                  >
+                    <Icon size={16} />
+                    {label}
+                  </button>
+                );
+              })}
           </div>
         </div>
 
@@ -1434,8 +1473,33 @@ function AdminDashboard({
             </div>
           )}
 
+          {/* Connecting / Silent Retry */}
+          {isConnecting && !error && (
+            <div
+              className="m-4 p-4 rounded-2xl flex items-center gap-3"
+              style={{
+                background: "rgba(0,66,37,0.06)",
+                border: "1px solid rgba(0,66,37,0.15)",
+              }}
+            >
+              <div
+                className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin flex-shrink-0"
+                style={{
+                  borderColor: "oklch(var(--abl-green-dark))",
+                  borderTopColor: "transparent",
+                }}
+              />
+              <p
+                className="text-sm font-medium"
+                style={{ color: "oklch(var(--abl-green-dark))" }}
+              >
+                Connecting to server… please wait
+              </p>
+            </div>
+          )}
+
           {/* Error */}
-          {!loading && error && (
+          {!loading && error && !isConnecting && (
             <div
               data-ocid="admin.error_state"
               className="m-4 p-4 rounded-2xl flex items-center gap-3"
@@ -1815,19 +1879,21 @@ function AdminDashboard({
                             {getZoneLabel(r.category)}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          data-ocid={`admin.delete_button.${i + 1}`}
-                          onClick={(e) => requestDelete(r.id, e)}
-                          className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all active:scale-90"
-                          style={{
-                            background: "rgba(220,38,38,0.08)",
-                            border: "1px solid rgba(220,38,38,0.18)",
-                          }}
-                          title="Delete record"
-                        >
-                          <Trash2 size={14} color="#DC2626" />
-                        </button>
+                        {role === "admin" && (
+                          <button
+                            type="button"
+                            data-ocid={`admin.delete_button.${i + 1}`}
+                            onClick={(e) => requestDelete(r.id, e)}
+                            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all active:scale-90"
+                            style={{
+                              background: "rgba(220,38,38,0.08)",
+                              border: "1px solid rgba(220,38,38,0.18)",
+                            }}
+                            title="Delete record"
+                          >
+                            <Trash2 size={14} color="#DC2626" />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -2296,11 +2362,14 @@ function LoginModal({
   onClose: () => void;
   onAdminLogin?: (role: "admin" | "hc") => void;
 }) {
+  const { actor } = useActor();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [selectedRole, setSelectedRole] = useState<LoginRole>("hs");
   const [loginError, setLoginError] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
 
   // Close on Escape key
   useEffect(() => {
@@ -2348,7 +2417,7 @@ function LoginModal({
     hc: { email: "hc@ablpulse.in", password: "ABLHC@2025" },
   } as const;
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setLoginError("");
     if (selectedRole === "admin") {
       if (
@@ -2363,14 +2432,33 @@ function LoginModal({
         );
       }
     } else if (selectedRole === "hc") {
-      if (
-        email === DUMMY_CREDS.hc.email &&
-        password === DUMMY_CREDS.hc.password
-      ) {
-        onClose();
-        onAdminLogin?.("hc");
-      } else {
-        setLoginError("Invalid Health Coach credentials.");
+      if (!actor) {
+        setLoginError("Connecting to server, please try again.");
+        return;
+      }
+      setIsLoggingIn(true);
+      try {
+        const fullActor = actor as unknown as BackendFullInterface;
+        const result = await fullActor.loginHC(email, password);
+        if ("ok" in result) {
+          onClose();
+          onAdminLogin?.("hc");
+        } else {
+          const errCode = result.err;
+          if (errCode === "PENDING") {
+            setLoginError("PENDING");
+          } else if (errCode === "REJECTED") {
+            setLoginError("REJECTED");
+          } else {
+            setLoginError(
+              "Invalid credentials. Please check your email and password.",
+            );
+          }
+        }
+      } catch {
+        setLoginError("Unable to connect. Please try again.");
+      } finally {
+        setIsLoggingIn(false);
       }
     } else {
       // HS — close modal (placeholder)
@@ -2586,29 +2674,68 @@ function LoginModal({
             </div>
           </div>
 
-          {/* Error message */}
-          {loginError && (
-            <p
-              className="text-xs rounded-lg px-3 py-2"
+          {/* Error message / Status messages */}
+          {loginError === "PENDING" && (
+            <div
+              className="text-xs rounded-lg px-3 py-2.5 flex flex-col gap-1"
+              style={{
+                color: "oklch(var(--abl-gold))",
+                background: "oklch(var(--abl-gold) / 0.08)",
+                border: "1px solid oklch(var(--abl-gold) / 0.3)",
+              }}
+              data-ocid="hc_login.pending_state"
+            >
+              <span className="font-bold">⏳ Awaiting Approval</span>
+              <span>
+                Your registration is under review. Please wait for Admin
+                approval.
+              </span>
+            </div>
+          )}
+          {loginError === "REJECTED" && (
+            <div
+              className="text-xs rounded-lg px-3 py-2.5 flex flex-col gap-1"
               style={{
                 color: "#DC2626",
                 background: "rgba(220,38,38,0.07)",
                 border: "1px solid rgba(220,38,38,0.2)",
               }}
-              data-ocid="login.error_state"
+              data-ocid="hc_login.rejected_state"
             >
-              {loginError}
-            </p>
+              <span className="font-bold">❌ Application Not Approved</span>
+              <span>
+                Your application was not approved. Please contact
+                support@ablpulse.com
+              </span>
+            </div>
           )}
+          {loginError &&
+            loginError !== "PENDING" &&
+            loginError !== "REJECTED" && (
+              <p
+                className="text-xs rounded-lg px-3 py-2"
+                style={{
+                  color: "#DC2626",
+                  background: "rgba(220,38,38,0.07)",
+                  border: "1px solid rgba(220,38,38,0.2)",
+                }}
+                data-ocid="login.error_state"
+              >
+                {loginError}
+              </p>
+            )}
 
           {/* Submit */}
           <button
             type="button"
             data-ocid="login.submit_button"
             onClick={handleLogin}
-            className="btn-green w-full py-3 rounded-xl text-sm font-bold tracking-wide uppercase shadow-wellness"
+            disabled={isLoggingIn}
+            className="btn-green w-full py-3 rounded-xl text-sm font-bold tracking-wide uppercase shadow-wellness flex items-center justify-center gap-2"
+            style={isLoggingIn ? { opacity: 0.7 } : {}}
           >
-            Login to ABL PULSE
+            {isLoggingIn && <Loader2 size={16} className="animate-spin" />}
+            {isLoggingIn ? "Logging in..." : "Login to ABL PULSE"}
           </button>
 
           {/* Dummy Credentials Info Box — Admin */}
@@ -2663,54 +2790,37 @@ function LoginModal({
             </div>
           )}
 
-          {/* Dummy Credentials Info Box — HC */}
+          {/* Register as HC link */}
           {selectedRole === "hc" && (
-            <div
-              data-ocid="login.credentials_info"
-              className="rounded-xl p-3 flex flex-col gap-2"
-              style={{
-                background: "oklch(var(--abl-gold) / 0.07)",
-                border: "1px solid oklch(var(--abl-gold) / 0.28)",
-              }}
-            >
-              <p
-                className="text-xs font-bold flex items-center gap-1.5"
-                style={{ color: "oklch(var(--abl-gold))" }}
-              >
-                🏥 Health Coach Demo Credentials
-              </p>
-              <div className="flex flex-col gap-0.5">
-                <p
-                  className="text-[11px]"
-                  style={{ color: "oklch(var(--abl-green))" }}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex-1 h-px"
+                  style={{ background: "oklch(var(--abl-border) / 0.4)" }}
+                />
+                <span
+                  className="text-xs"
+                  style={{ color: "oklch(var(--abl-border))" }}
                 >
-                  <span className="font-semibold">Email:</span>{" "}
-                  {DUMMY_CREDS.hc.email}
-                </p>
-                <p
-                  className="text-[11px]"
-                  style={{ color: "oklch(var(--abl-green))" }}
-                >
-                  <span className="font-semibold">Password:</span>{" "}
-                  {DUMMY_CREDS.hc.password}
-                </p>
+                  New here?
+                </span>
+                <div
+                  className="flex-1 h-px"
+                  style={{ background: "oklch(var(--abl-border) / 0.4)" }}
+                />
               </div>
               <button
                 type="button"
-                data-ocid="login.use_credentials_button"
-                onClick={() => {
-                  setEmail(DUMMY_CREDS.hc.email);
-                  setPassword(DUMMY_CREDS.hc.password);
-                  setLoginError("");
-                }}
-                className="text-xs font-bold py-1.5 rounded-lg transition-all"
+                data-ocid="hc_register.open_modal_button"
+                onClick={() => setShowRegisterForm(true)}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all"
                 style={{
-                  background: "oklch(var(--abl-gold))",
-                  color: "white",
-                  border: "none",
+                  background: "oklch(var(--abl-gold) / 0.1)",
+                  color: "oklch(var(--abl-gold))",
+                  border: "1.5px solid oklch(var(--abl-gold) / 0.35)",
                 }}
               >
-                Use These Credentials
+                Register as Health Coach
               </button>
             </div>
           )}
@@ -2733,6 +2843,466 @@ function LoginModal({
               support@ablpulse.com
             </button>
           </p>
+        </div>
+      </dialog>
+
+      {/* HC Registration Form Modal */}
+      {showRegisterForm && (
+        <HCRegistrationForm
+          onClose={() => setShowRegisterForm(false)}
+          onBackToLogin={() => setShowRegisterForm(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   HC REGISTRATION FORM
+───────────────────────────────────────────── */
+const HC_EXPERIENCE_OPTIONS = [
+  "0 - 6 Months",
+  "6 - 12 Months",
+  "1 - 2 Years",
+  "2 - 3 Years",
+  "3 - 4 Years",
+  "4 - 5 Years",
+  "5+ Years",
+];
+
+function HCRegistrationForm({
+  onClose,
+  onBackToLogin,
+}: {
+  onClose: () => void;
+  onBackToLogin: () => void;
+}) {
+  const { actor } = useActor();
+  const [form, setForm] = useState({
+    name: "",
+    mobile: "",
+    email: "",
+    password: "",
+    experience: "",
+    expertise: "",
+    currentWorking: "",
+    socialMedia: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const inputStyle: CSSProperties = {
+    border: "1.5px solid oklch(var(--abl-border))",
+    color: "oklch(var(--abl-green))",
+    background: "oklch(var(--abl-bg))",
+    width: "100%",
+    padding: "10px 14px",
+    borderRadius: "12px",
+    fontSize: "14px",
+    outline: "none",
+    transition: "border-color 0.15s, box-shadow 0.15s",
+  };
+
+  const labelStyle: CSSProperties = {
+    fontSize: "11px",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    color: "oklch(var(--abl-green))",
+    marginBottom: "4px",
+    display: "block",
+  };
+
+  const handleFocus = (
+    e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
+    e.currentTarget.style.borderColor = "oklch(var(--abl-green))";
+    e.currentTarget.style.boxShadow =
+      "0 0 0 3px oklch(var(--abl-green) / 0.12)";
+  };
+  const handleBlur = (
+    e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
+    e.currentTarget.style.borderColor = "oklch(var(--abl-border))";
+    e.currentTarget.style.boxShadow = "none";
+  };
+
+  const handleSubmit = async () => {
+    setError("");
+    if (
+      !form.name ||
+      !form.mobile ||
+      !form.email ||
+      !form.password ||
+      !form.experience ||
+      !form.expertise ||
+      !form.currentWorking
+    ) {
+      setError("Please fill in all required fields.");
+      return;
+    }
+    if (!actor) {
+      setError("Connecting to server, please try again.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const fullActor = actor as unknown as BackendFullInterface;
+      const result = await fullActor.registerHC(
+        form.name,
+        form.mobile,
+        form.email,
+        form.password,
+        form.experience,
+        form.expertise,
+        form.currentWorking,
+        form.socialMedia,
+      );
+      if ("ok" in result) {
+        setSuccess(true);
+      } else {
+        if (result.err === "Email already registered.") {
+          setError(
+            "This email is already registered. Please use a different email or login.",
+          );
+        } else {
+          setError(result.err || "Registration failed. Please try again.");
+        }
+      }
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[1200] flex items-center justify-center p-4"
+      style={{
+        background: "oklch(var(--abl-dark) / 0.8)",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      {/* Click-outside */}
+      <button
+        type="button"
+        className="absolute inset-0 w-full h-full cursor-default"
+        onClick={onClose}
+        aria-label="Close"
+        tabIndex={-1}
+      />
+      <dialog
+        open
+        className="relative w-full max-w-sm rounded-2xl overflow-hidden shadow-glow m-0 p-0 border-0"
+        style={{ background: "white", maxHeight: "90vh", overflowY: "auto" }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-6 py-4 sticky top-0 z-10"
+          style={{ background: "oklch(var(--abl-green))" }}
+        >
+          <div>
+            <p className="text-base font-bold text-white">
+              Register as Health Coach
+            </p>
+            <p className="text-xs text-white/70">
+              Submit your details for admin review
+            </p>
+          </div>
+          <button
+            type="button"
+            data-ocid="hc_register.cancel_button"
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-full"
+            style={{ background: "rgba(255,255,255,0.15)", color: "white" }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 pt-5 pb-6 flex flex-col gap-3.5">
+          {success ? (
+            /* Success Screen */
+            <div
+              data-ocid="hc_register.success_state"
+              className="flex flex-col items-center gap-4 py-4 text-center"
+            >
+              <div
+                className="w-16 h-16 rounded-full flex items-center justify-center"
+                style={{ background: "oklch(var(--abl-green) / 0.1)" }}
+              >
+                <CheckCircle2
+                  size={32}
+                  style={{ color: "oklch(var(--abl-green))" }}
+                />
+              </div>
+              <div>
+                <h3
+                  className="font-bold text-lg mb-1"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                >
+                  Registration Submitted!
+                </h3>
+                <p
+                  className="text-sm"
+                  style={{ color: "oklch(var(--abl-green-mid))" }}
+                >
+                  Your registration has been submitted successfully. Our Admin
+                  will review and approve your account. Please check back in
+                  24–48 hours.
+                </p>
+              </div>
+              <button
+                type="button"
+                data-ocid="hc_register.back_button"
+                onClick={onBackToLogin}
+                className="btn-green px-6 py-2.5 rounded-xl text-sm font-bold"
+              >
+                Back to Login
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Full Name */}
+              <div>
+                <label htmlFor="hc-reg-name" style={labelStyle}>
+                  Full Name <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  id="hc-reg-name"
+                  data-ocid="hc_register.name_input"
+                  value={form.name}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, name: e.target.value }))
+                  }
+                  placeholder="Dr. Rahul Sharma"
+                  style={inputStyle}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                />
+              </div>
+
+              {/* Mobile */}
+              <div>
+                <label htmlFor="hc-reg-mobile" style={labelStyle}>
+                  Mobile Number <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <input
+                  type="tel"
+                  id="hc-reg-mobile"
+                  data-ocid="hc_register.mobile_input"
+                  value={form.mobile}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, mobile: e.target.value }))
+                  }
+                  placeholder="+91 98765 43210"
+                  style={inputStyle}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                />
+              </div>
+
+              {/* Email */}
+              <div>
+                <label htmlFor="hc-reg-email" style={labelStyle}>
+                  Email ID <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <input
+                  type="email"
+                  id="hc-reg-email"
+                  data-ocid="hc_register.email_input"
+                  value={form.email}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, email: e.target.value }))
+                  }
+                  placeholder="you@example.com"
+                  style={inputStyle}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                />
+              </div>
+
+              {/* Password */}
+              <div>
+                <label htmlFor="hc-reg-password" style={labelStyle}>
+                  Password <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    id="hc-reg-password"
+                    data-ocid="hc_register.password_input"
+                    value={form.password}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, password: e.target.value }))
+                    }
+                    placeholder="Min. 8 characters"
+                    style={{ ...inputStyle, paddingRight: "44px" }}
+                    onFocus={handleFocus}
+                    onBlur={handleBlur}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1"
+                    style={{ color: "oklch(var(--abl-border))" }}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Experience Dropdown */}
+              <div>
+                <label htmlFor="hc-reg-experience" style={labelStyle}>
+                  Experience <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <select
+                  id="hc-reg-experience"
+                  data-ocid="hc_register.experience_select"
+                  value={form.experience}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, experience: e.target.value }))
+                  }
+                  style={{
+                    ...inputStyle,
+                    appearance: "none",
+                    cursor: "pointer",
+                  }}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                >
+                  <option value="">Select experience</option>
+                  {HC_EXPERIENCE_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Field Expertise */}
+              <div>
+                <label htmlFor="hc-reg-expertise" style={labelStyle}>
+                  Field Expertise <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  id="hc-reg-expertise"
+                  data-ocid="hc_register.expertise_input"
+                  value={form.expertise}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, expertise: e.target.value }))
+                  }
+                  placeholder="e.g. Yoga, Naturopathy, Ayurveda"
+                  style={inputStyle}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                />
+              </div>
+
+              {/* Current Working */}
+              <div>
+                <label htmlFor="hc-reg-working" style={labelStyle}>
+                  Current Working (Organization/Clinic){" "}
+                  <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  id="hc-reg-working"
+                  data-ocid="hc_register.working_input"
+                  value={form.currentWorking}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, currentWorking: e.target.value }))
+                  }
+                  placeholder="e.g. ABL Wellness Centre"
+                  style={inputStyle}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                />
+              </div>
+
+              {/* Social Media (Optional) */}
+              <div>
+                <label htmlFor="hc-reg-social" style={labelStyle}>
+                  Social Media Page{" "}
+                  <span
+                    style={{
+                      color: "oklch(var(--abl-border))",
+                      fontWeight: 400,
+                      textTransform: "none",
+                      letterSpacing: 0,
+                    }}
+                  >
+                    (Optional)
+                  </span>
+                </label>
+                <input
+                  type="url"
+                  id="hc-reg-social"
+                  data-ocid="hc_register.social_input"
+                  value={form.socialMedia}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, socialMedia: e.target.value }))
+                  }
+                  placeholder="https://instagram.com/yourhandle"
+                  style={inputStyle}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                />
+              </div>
+
+              {/* Error */}
+              {error && (
+                <p
+                  className="text-xs rounded-lg px-3 py-2"
+                  style={{
+                    color: "#DC2626",
+                    background: "rgba(220,38,38,0.07)",
+                    border: "1px solid rgba(220,38,38,0.2)",
+                  }}
+                >
+                  {error}
+                </p>
+              )}
+
+              {/* Submit */}
+              <button
+                type="button"
+                data-ocid="hc_register.submit_button"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="btn-green w-full py-3 rounded-xl text-sm font-bold tracking-wide uppercase flex items-center justify-center gap-2 mt-1"
+                style={submitting ? { opacity: 0.7 } : {}}
+              >
+                {submitting && <Loader2 size={16} className="animate-spin" />}
+                {submitting ? "Submitting..." : "Submit Registration"}
+              </button>
+
+              <p
+                className="text-center text-xs"
+                style={{ color: "oklch(var(--abl-border))" }}
+              >
+                Already registered?{" "}
+                <button
+                  type="button"
+                  className="font-semibold hover:underline"
+                  style={{ color: "oklch(var(--abl-green))" }}
+                  onClick={onBackToLogin}
+                >
+                  Back to Login
+                </button>
+              </p>
+            </>
+          )}
         </div>
       </dialog>
     </div>

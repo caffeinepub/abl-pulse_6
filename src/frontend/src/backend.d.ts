@@ -29,6 +29,19 @@ export interface HealthSeekerRecord {
     gender: string;
     category: string;
 }
+export interface HCRecord {
+    id: bigint;
+    name: string;
+    mobile: string;
+    email: string;
+    password: string;
+    experienceMonths: string;
+    fieldExpertise: string;
+    currentWorking: string;
+    socialMedia: string;
+    status: string;
+    registeredAt: bigint;
+}
 export interface backendInterface {
     deleteSubmission(id: bigint): Promise<boolean>;
     getSubmissionById(id: bigint): Promise<HealthSeekerRecord | null>;
@@ -36,4 +49,11 @@ export interface backendInterface {
     saveBasicInfo(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null): Promise<bigint>;
     submitAssessment(name: string, gender: string, age: string, profession: string, weight: string, height: string, bp: string, sugar: string, thyroid: string, whatsapp: string, email: string | null, answers: Array<bigint>): Promise<bigint>;
     updateAssessmentResult(id: bigint, answers: Array<bigint>): Promise<boolean>;
+    registerHC(name: string, mobile: string, email: string, password: string, experienceMonths: string, fieldExpertise: string, currentWorking: string, socialMedia: string): Promise<{ ok: bigint } | { err: string }>;
+    loginHC(email: string, password: string): Promise<{ ok: HCRecord } | { err: string }>;
+    getHCRequests(): Promise<Array<HCRecord>>;
+    getApprovedHCs(): Promise<Array<HCRecord>>;
+    approveHC(id: bigint): Promise<{ ok: boolean } | { err: string }>;
+    rejectHC(id: bigint): Promise<{ ok: boolean } | { err: string }>;
+    getHCById(id: bigint): Promise<HCRecord | null>;
 }

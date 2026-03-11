@@ -30,18 +30,39 @@ actor {
     submittedAt : Int;
   };
 
+  type HCRecord = {
+    id : Nat;
+    name : Text;
+    mobile : Text;
+    email : Text;
+    password : Text;
+    experienceMonths : Text;
+    fieldExpertise : Text;
+    currentWorking : Text;
+    socialMedia : Text;
+    status : Text;
+    registeredAt : Int;
+  };
+
   stable var nextId : Nat = 1;
   stable var submissionsStable : [(Nat, HealthSeekerRecord)] = [];
+  stable var nextHCId : Nat = 1;
+  stable var hcStable : [(Nat, HCRecord)] = [];
 
   var submissions = Map.empty<Nat, HealthSeekerRecord>();
+  var hcRecords = Map.empty<Nat, HCRecord>();
 
   system func preupgrade() {
     submissionsStable := submissions.entries().toArray();
+    hcStable := hcRecords.entries().toArray();
   };
 
   system func postupgrade() {
     for ((k, v) in submissionsStable.vals()) {
       submissions.add(k, v);
+    };
+    for ((k, v) in hcStable.vals()) {
+      hcRecords.add(k, v);
     };
   };
 
@@ -223,5 +244,95 @@ actor {
     } else {
       false;
     };
+  };
+
+  // ── HC Functions ──────────────────────────────────────────────
+
+  public shared ({ caller }) func registerHC(
+    name : Text,
+    mobile : Text,
+    email : Text,
+    password : Text,
+    experienceMonths : Text,
+    fieldExpertise : Text,
+    currentWorking : Text,
+    socialMedia : Text,
+  ) : async { #ok : Nat; #err : Text } {
+    // Check duplicate email
+    for ((_, hc) in hcRecords.entries()) {
+      if (hc.email == email) {
+        return #err("Email already registered.");
+      };
+    };
+
+    let record : HCRecord = {
+      id = nextHCId;
+      name;
+      mobile;
+      email;
+      password;
+      experienceMonths;
+      fieldExpertise;
+      currentWorking;
+      socialMedia;
+      status = "PENDING";
+      registeredAt = Time.now();
+    };
+
+    hcRecords.add(nextHCId, record);
+    nextHCId += 1;
+    #ok(record.id);
+  };
+
+  public query ({ caller }) func loginHC(email : Text, password : Text) : async { #ok : HCRecord; #err : Text } {
+    for ((_, hc) in hcRecords.entries()) {
+      if (hc.email == email) {
+        if (hc.password != password) {
+          return #err("INVALID");
+        };
+        if (hc.status == "PENDING") {
+          return #err("PENDING");
+        };
+        if (hc.status == "REJECTED") {
+          return #err("REJECTED");
+        };
+        return #ok(hc);
+      };
+    };
+    #err("INVALID");
+  };
+
+  public query ({ caller }) func getHCRequests() : async [HCRecord] {
+    hcRecords.values().filter(func(hc : HCRecord) : Bool { hc.status == "PENDING" }).toArray();
+  };
+
+  public query ({ caller }) func getApprovedHCs() : async [HCRecord] {
+    hcRecords.values().filter(func(hc : HCRecord) : Bool { hc.status == "ACTIVE" }).toArray();
+  };
+
+  public shared ({ caller }) func approveHC(id : Nat) : async { #ok : Bool; #err : Text } {
+    switch (hcRecords.get(id)) {
+      case (null) { #err("HC not found.") };
+      case (?hc) {
+        let updated = { hc with status = "ACTIVE" };
+        hcRecords.add(id, updated);
+        #ok(true);
+      };
+    };
+  };
+
+  public shared ({ caller }) func rejectHC(id : Nat) : async { #ok : Bool; #err : Text } {
+    switch (hcRecords.get(id)) {
+      case (null) { #err("HC not found.") };
+      case (?hc) {
+        let updated = { hc with status = "REJECTED" };
+        hcRecords.add(id, updated);
+        #ok(true);
+      };
+    };
+  };
+
+  public query ({ caller }) func getHCById(id : Nat) : async ?HCRecord {
+    hcRecords.get(id);
   };
 };
